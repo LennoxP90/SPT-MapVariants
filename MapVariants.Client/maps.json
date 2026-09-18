@@ -1,0 +1,20 @@
+{
+  "maps": [
+    {
+      "locationIds": ["lighthouse"],
+      "pluginGuid": "com.manimal.lighthouse",
+      "displayName": "Lighthouse",
+      "backportName": "Manimal",
+      "originalName": "Vanilla",
+      "standDown": "Manimal.Lighthouse.Client.LighthouseSceneLoader:ReleaseIfUnused"
+    },
+    {
+      "locationIds": ["interchange"],
+      "pluginGuid": "com.manimal.interchange",
+      "displayName": "Interchange",
+      "backportName": "Manimal",
+      "originalName": "Vanilla",
+      "standDown": "none"
+    }
+  ]
+}
