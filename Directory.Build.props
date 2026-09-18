@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <ModVersion>1.0.0</ModVersion>
+    <ModGuid>com.lennoxp90.mapvariants</ModGuid>
+    <ModName>MapVariants</ModName>
+    <PluginFolder>LennoxP90-MapVariants</PluginFolder>
+    <SptRoot Condition="'$(SptRoot)' == ''">C:\SPT C\SPT-4.1-Clean</SptRoot>
+    <SptManaged>$(SptRoot)\EscapeFromTarkov_Data\Managed</SptManaged>
+    <SptBepInEx>$(SptRoot)\BepInEx</SptBepInEx>
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+    <DistRoot>$(MSBuildThisFileDirectory)dist\$(Configuration)\</DistRoot>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+</Project>

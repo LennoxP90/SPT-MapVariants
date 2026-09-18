@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="MapVariants.Tests/MapVariants.Tests.csproj" />
+  <Project Path="MapVariants.Client/MapVariants.Client.csproj" />
+  <Project Path="MapVariants.Server/MapVariants.Server.csproj" />
+</Solution>
