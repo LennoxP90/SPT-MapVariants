@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MapVariants.Server</RootNamespace>
+    <AssemblyName>MapVariants.Server</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Version>$(ModVersion)</Version>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SPTarkov.Common" Version="4.1.0" />
+    <PackageReference Include="SPTarkov.DI" Version="4.1.0" />
+    <PackageReference Include="SPTarkov.Server.Core" Version="4.1.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\MapVariants.Shared\*.cs" Link="Shared\%(Filename)%(Extension)" />
+  </ItemGroup>
+  <Target Name="StageServer" AfterTargets="Build">
+    <PropertyGroup><StageDir>$(DistRoot)SPT_Runtime\user\mods\$(PluginFolder)\</StageDir></PropertyGroup>
+    <MakeDir Directories="$(StageDir)" />
+    <Copy SourceFiles="$(TargetPath);$(ProjectDir)$(OutDir)$(AssemblyName).deps.json" DestinationFolder="$(StageDir)" />
+    <Message Importance="high" Text="staged server to $(StageDir)" />
+  </Target>
+</Project>
