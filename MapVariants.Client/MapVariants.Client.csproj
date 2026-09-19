@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>MapVariants.Client</AssemblyName>
+    <RootNamespace>MapVariants.Client</RootNamespace>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Version>$(ModVersion)</Version>
+    <AssemblyVersion>$(ModVersion).0</AssemblyVersion>
+    <FileVersion>$(AssemblyVersion)</FileVersion>
+  </PropertyGroup>
+
+  <Target Name="CheckEftRefs" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(SptManaged)\Assembly-CSharp.dll')" Text="EFT assemblies not found at $(SptManaged). Pass /p:SptRoot=&lt;install&gt;." />
+  </Target>
+
+  <ItemGroup>
+    <Compile Include="..\MapVariants.Shared\*.cs" Link="Shared\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx"><HintPath>$(SptBepInEx)\core\BepInEx.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(SptBepInEx)\core\0Harmony.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Assembly-CSharp"><HintPath>$(SptManaged)\Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Comfort"><HintPath>$(SptManaged)\Comfort.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Comfort.Unity"><HintPath>$(SptManaged)\Comfort.Unity.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>$(SptManaged)\Newtonsoft.Json.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(SptManaged)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(SptManaged)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.IMGUIModule"><HintPath>$(SptManaged)\UnityEngine.IMGUIModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(SptManaged)\UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.PhysicsModule"><HintPath>$(SptManaged)\UnityEngine.PhysicsModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UI"><HintPath>$(SptManaged)\UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UIModule"><HintPath>$(SptManaged)\UnityEngine.UIModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(SptManaged)\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.TextMeshPro"><HintPath>$(SptManaged)\Unity.TextMeshPro.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(SptManaged)\UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Sirenix.Serialization"><HintPath>$(SptManaged)\Sirenix.Serialization.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="spt-common"><HintPath>$(SptBepInEx)\plugins\spt\spt-common.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <Target Name="GenerateBuildInfo" BeforeTargets="CoreCompile">
+    <PropertyGroup><BuildInfoFile>$(IntermediateOutputPath)BuildInfo.g.cs</BuildInfoFile></PropertyGroup>
+    <ItemGroup>
+      <_BuildInfoLines Include="namespace $(RootNamespace) { internal static class BuildInfo { public const string Version = %22$(ModVersion)%22%3B public const string Guid = %22$(ModGuid)%22%3B public const string Folder = %22$(PluginFolder)%22%3B } }" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(BuildInfoFile)" Lines="@(_BuildInfoLines)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup><Compile Include="$(BuildInfoFile)" /></ItemGroup>
+  </Target>
+
+  <Target Name="StageClient" AfterTargets="Build">
+    <PropertyGroup><StageDir>$(DistRoot)BepInEx\plugins\$(PluginFolder)\</StageDir></PropertyGroup>
+    <ItemGroup>
+      <MapsFile Include="$(ProjectDir)maps.json" />
+      <Tiles Include="$(ProjectDir)tiles\*.png" />
+    </ItemGroup>
+    <MakeDir Directories="$(StageDir);$(StageDir)tiles" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(StageDir)" />
+    <Copy SourceFiles="@(MapsFile)" DestinationFolder="$(StageDir)" Condition="Exists('$(ProjectDir)maps.json')" />
+    <Copy SourceFiles="@(Tiles)" DestinationFolder="$(StageDir)tiles" />
+    <Message Importance="high" Text="staged client to $(StageDir)" />
+  </Target>
+</Project>
