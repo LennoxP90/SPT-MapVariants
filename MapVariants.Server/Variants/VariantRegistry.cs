@@ -23,6 +23,11 @@ public class VariantRegistry(LocationTable locationTable, ISptLogger<VariantRegi
         public required LocationFieldSet Original;
         public LocationFieldSet? Backport;
         public required string WireId;
+
+        // The backport's values before any load-time mod configured them, and the object they
+        // were read from, so the replay can prove the reading belongs to the backport.
+        public LocationValues? PristineBackport;
+        public object? PristineSource;
     }
 
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.OrdinalIgnoreCase);
@@ -47,6 +52,38 @@ public class VariantRegistry(LocationTable locationTable, ISptLogger<VariantRegi
                 };
             }
             logger.Debug($"[MV] snapshot: {_entries.Count} location(s) captured at Watermark");
+        }
+    }
+
+    /// <summary>
+    /// Reads each backport's values, for every location that has one and has not been read yet.
+    /// Called from several probes across the load: the first reading taken once a location stopped
+    /// being the shipped object is kept and frozen, because a later probe would read a copy a
+    /// load-time mod has already changed.
+    /// </summary>
+    internal void CaptureBackportValues()
+    {
+        lock (_gate)
+        {
+            int read = 0, frozen = 0, shipped = 0;
+            foreach (var pair in _entries)
+            {
+                var entry = pair.Value;
+                if (entry.PristineSource is not null) { frozen++; continue; }
+
+                var live = locationTable.GetLocation(pair.Key);
+                if (live?.Base is null) continue;
+
+                // Still the object captured at Watermark, so no backport has replaced it yet.
+                if (ReferenceEquals(live.Base, entry.Original.Base)) { shipped++; continue; }
+
+                entry.PristineBackport = LocationValueMirror.Read(live.Base);
+                entry.PristineSource = live.Base;
+                read++;
+            }
+            if (read > 0)
+                logger.Debug($"[MV] pristine values read for {read} backport(s); {frozen} already read, "
+                             + $"{shipped} still on the shipped data");
         }
     }
 
@@ -93,6 +130,9 @@ public class VariantRegistry(LocationTable locationTable, ISptLogger<VariantRegi
                 Original = LocationFieldSet.Capture(original),
                 Backport = LocationFieldSet.Capture(backport),
                 WireId = original.Base?.Id ?? locationId.Trim().ToLowerInvariant(),
+                // Registration runs ahead of the load-time mods, so this pair is pristine too.
+                PristineBackport = LocationValueMirror.Read(backport.Base),
+                PristineSource = backport.Base,
             };
             // Installed immediately, which is what makes the resting state true by construction. A
             // provider's table holds whatever that mod last assigned, which we cannot know.
@@ -151,6 +191,7 @@ public class VariantRegistry(LocationTable locationTable, ISptLogger<VariantRegi
             // without the mirrored transformers rather than stuck on the backport.
             entry.Original.AssignTo(live);
             MirrorTransformersIntoStock(id, entry);
+            ReplayConfigIntoStock(id, entry);
             logger.Info($"[MV] {id}: serving the SHIPPED map; its own spawn configuration is in use, not the backport's");
         }
 
@@ -172,6 +213,49 @@ public class VariantRegistry(LocationTable locationTable, ISptLogger<VariantRegi
                    + LazyLoadTransformers.MirrorMissing(entry.Backport.StaticContainers, entry.Original.StaticContainers)
                    + LazyLoadTransformers.MirrorMissing(entry.Backport.StaticLoot, entry.Original.StaticLoot);
         if (copied > 0) logger.Debug($"[MV] {id}: mirrored {copied} LazyLoad transformer(s) into the stock set");
+    }
+
+    // A backport is installed during Preload, so a mod that configures locations at load only ever
+    // configures the backport. Diffing it against the pristine reading gives what those mods
+    // changed, and only that is written onto the shipped map.
+    private void ReplayConfigIntoStock(string id, Entry entry)
+    {
+        if (entry.PristineBackport is null)
+        {
+            logger.Debug($"[MV] {id}: no pristine reading, so no config replay");
+            return;
+        }
+
+        // The reading is only pristine if it came from the object that turned out to be the
+        // backport. Anything else would copy the backport's own data across.
+        if (!ReferenceEquals(entry.PristineSource, entry.Backport!.Base))
+        {
+            logger.Info($"[MV] {id}: the pristine reading is not of this backport's base, so no "
+                        + "configuration is replayed; the shipped map serves its own values");
+            return;
+        }
+
+        // Swallowed for the same reason as the mirror above: a refused replay must leave the table
+        // on the shipped map, not stranded on the backport.
+        try
+        {
+            var plan = ReplayPolicy.Compute(entry.PristineBackport, LocationValueMirror.Read(entry.Backport!.Base));
+            if (plan.IsEmpty)
+            {
+                logger.Info($"[MV] {id}: no load-time mod changed this map's replayable values, so nothing is replayed");
+                return;
+            }
+
+            var outcome = LocationValueMirror.Apply(entry.Original.Base, plan);
+            var summary = $"[MV] {id}: replayed {outcome.Written} of {plan.Count} value(s) a load-time mod "
+                          + $"configured onto the shipped map: {plan.Describe()}";
+            if (outcome.Refused.Count == 0) logger.Info(summary);
+            else logger.Warning(summary + " | NOT written: " + string.Join(", ", outcome.Refused));
+        }
+        catch (Exception ex)
+        {
+            logger.Error($"[MV] {id}: config replay failed; the shipped map serves its own values", ex);
+        }
     }
 
     public string InstalledVariant(string locationId)
