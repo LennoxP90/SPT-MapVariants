@@ -38,6 +38,10 @@ namespace MapVariants.Client
 
         static readonly HashSet<string> Reported = new HashSet<string>();
 
+        // ChildPresets of a preset already loading. The root's ServerName is the raid's location;
+        // a child's can name another (Factory night's culling child says factory4_day).
+        static readonly HashSet<ScenesPreset> Children = new HashSet<ScenesPreset>();
+
         // Per map key: whether this process has ever run the BACKPORT, so the next shipped raid knows
         // there may be state to stand down. Cleared when a stand-down succeeds.
         static readonly HashSet<string> _backportLoadedThisSession = new HashSet<string>();
@@ -473,6 +477,9 @@ namespace MapVariants.Client
             try
             {
                 if (!preset) return true;
+                if (Children.Remove(preset)) return true;
+                foreach (var child in preset.ChildPresets ?? new ScenesPreset[0])
+                    if (child) Children.Add(child);
 
                 // A preset with no ServerName is a REGISTERED PROVIDER's own scenes, and this prefix
                 // has nothing to say about them: the provider was given its answer at the decision
