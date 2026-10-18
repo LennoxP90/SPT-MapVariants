@@ -29,6 +29,14 @@ internal static class LocationValueMirror
 
     private static readonly PropertyInfo[] BaseProperties = Readable(typeof(LocationBase));
     private static readonly PropertyInfo[] ExitProperties = Readable(typeof(Exit));
+    private static readonly PropertyInfo[] AirdropProperties = Readable(typeof(AirdropParameter));
+
+    // Airdrop entries pair by index, carried as base scalars named "AirdropParameters[i].Field".
+    private const string AirdropList = nameof(LocationBase.AirdropParameters);
+
+    private static string AirdropPrefix(int index) => $"{AirdropList}[{index}].";
+
+    private static bool IsAirdropKey(string key) => key.StartsWith(AirdropList + "[", StringComparison.Ordinal);
 
     private static PropertyInfo[] Readable(Type type) => type
         .GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -55,7 +63,22 @@ internal static class LocationValueMirror
             }
         }
 
+        ReadAirdrops(location, scalars);
         return new LocationValues(scalars, ReadExits(location), collectionsEmpty);
+    }
+
+    private static void ReadAirdrops(LocationBase location, Dictionary<string, object?> scalars)
+    {
+        var entries = location.AirdropParameters ?? [];
+        for (var i = 0; i < entries.Count; i++)
+        {
+            if (entries[i] is not { } entry) continue;
+            foreach (var property in AirdropProperties)
+            {
+                if (!IsScalar(property.PropertyType)) continue;
+                if (TryRead(property, entry, out var value)) scalars[AirdropPrefix(i) + property.Name] = value;
+            }
+        }
     }
 
     // Keyed by exit name. A nameless or duplicated exit is dropped, because there would be no
@@ -98,7 +121,9 @@ internal static class LocationValueMirror
         if (target is null) return new ReplayOutcome(0, ["the shipped map has no base"]);
         if (plan.IsEmpty) return new ReplayOutcome(0, refused);
 
-        var written = Write(BaseProperties, target, plan.Scalars, "base", refused);
+        var baseScalars = plan.Scalars.Where(p => !IsAirdropKey(p.Key)).ToDictionary(p => p.Key, p => p.Value);
+        var written = Write(BaseProperties, target, baseScalars, "base", refused);
+        written += WriteAirdrops(target, plan.Scalars, refused);
 
         var reached = new HashSet<string>(StringComparer.Ordinal);
         foreach (var exit in target.Exits ?? [])
@@ -123,6 +148,27 @@ internal static class LocationValueMirror
         }
 
         return new ReplayOutcome(written, refused);
+    }
+
+    private static int WriteAirdrops(LocationBase target, IReadOnlyDictionary<string, object?> scalars, List<string> refused)
+    {
+        var entries = target.AirdropParameters ?? [];
+        var written = 0;
+        var reached = 0;
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var prefix = AirdropPrefix(i);
+            var values = scalars.Where(p => p.Key.StartsWith(prefix, StringComparison.Ordinal))
+                .ToDictionary(p => p.Key[prefix.Length..], p => p.Value);
+            if (values.Count == 0 || entries[i] is not { } entry) continue;
+            reached += values.Count;
+            written += Write(AirdropProperties, entry, values, prefix.TrimEnd('.'), refused);
+        }
+
+        var planned = scalars.Keys.Count(IsAirdropKey);
+        if (planned > reached)
+            refused.Add($"{planned - reached} airdrop value(s) (no matching entry on the shipped map)");
+        return written;
     }
 
     private static int Write(PropertyInfo[] properties, object target,
