@@ -26,6 +26,29 @@ namespace MapVariants.Shared
         public string? BackportTile { get; }
         public string? OriginalTile { get; }
 
+        // Variants a provider declared beyond the two, each built on the backport. Empty for every
+        // discovered map and for a provider that registered through the two-variant overload.
+        public ExtraVariant[] Extras { get; }
+
+        // Display order, left to right: original, backport, then the extras as declared.
+        public string[] Variants => new[] { MapVariant.Original, MapVariant.Backport }.Concat(Extras.Select(x => x.Id)).ToArray();
+
+        public string NameFor(string? variant)
+        {
+            var id = MapVariant.Normalise(variant);
+            return id == MapVariant.Original ? OriginalName
+                 : id == MapVariant.Backport ? BackportName
+                 : Extras.FirstOrDefault(x => x.Id == id)?.Name ?? BackportName;
+        }
+
+        public string? TileFor(string? variant)
+        {
+            var id = MapVariant.Normalise(variant);
+            return id == MapVariant.Original ? OriginalTile
+                 : id == MapVariant.Backport ? BackportTile
+                 : Extras.FirstOrDefault(x => x.Id == id)?.Tile ?? BackportTile;
+        }
+
         // null, "none", or "Namespace.Type:MethodName". docs/DESIGN-NOTES.md has why one backport
         // needs a stand-down and another does not.
         public string? StandDown { get; }
@@ -37,7 +60,7 @@ namespace MapVariants.Shared
 
         public ManagedMap(string[] locationIds, string? pluginGuid, string backportName, string originalName,
                           string? backportTile = null, string? originalTile = null, string? standDown = null,
-                          string? displayName = null)
+                          string? displayName = null, ExtraVariant[]? extras = null)
         {
             if (locationIds == null || locationIds.Length == 0) throw new ArgumentException("a managed map needs at least one location id", nameof(locationIds));
             LocationIds = locationIds.Select(Normalise).Where(id => id.Length > 0).Distinct().ToArray();
@@ -51,6 +74,8 @@ namespace MapVariants.Shared
             BackportTile = backportTile;
             OriginalTile = originalTile;
             StandDown = NormaliseStandDown(standDown);
+            Extras = (extras ?? new ExtraVariant[0]).Where(x => x != null && MapVariant.Declare(x.Id))
+                                                    .GroupBy(x => x.Id).Select(g => g.First()).ToArray();
         }
 
         public bool Covers(string? locationId) => LocationIds.Contains(Normalise(locationId));
@@ -58,7 +83,7 @@ namespace MapVariants.Shared
         // Lets a caller build the map first and read the real Key off it: the Key is the first
         // NON-EMPTY id, which is not always the first id.
         public ManagedMap WithTiles(string? backportTile, string? originalTile)
-            => new ManagedMap(LocationIds, PluginGuid, BackportName, OriginalName, backportTile, originalTile, StandDown, DisplayName);
+            => new ManagedMap(LocationIds, PluginGuid, BackportName, OriginalName, backportTile, originalTile, StandDown, DisplayName, Extras);
 
         public static string Normalise(string? locationId) => LocationId.Normalise(locationId);
 
@@ -73,5 +98,20 @@ namespace MapVariants.Shared
 
         static string Capitalise(string key)
             => key.Length == 0 ? key : char.ToUpperInvariant(key[0]) + key.Substring(1);
+    }
+
+    /// <summary>One declared variant beyond the two. Id is lower-cased; Name is the variant alone.</summary>
+    public sealed class ExtraVariant
+    {
+        public string Id { get; }
+        public string Name { get; }
+        public string? Tile { get; }
+
+        public ExtraVariant(string id, string? name, string? tile = null)
+        {
+            Id = (id ?? "").Trim().ToLowerInvariant();
+            Name = string.IsNullOrWhiteSpace(name) ? Id : name!.Trim();
+            Tile = string.IsNullOrWhiteSpace(tile) ? null : tile;
+        }
     }
 }

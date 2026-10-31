@@ -11,15 +11,15 @@ namespace MapVariants.Client
     /// <summary>
     /// The map-version prompt, built from uGUI at runtime on its own overlay
     /// canvas in the game's faction-select look. Accept resolves with the
-    /// selection, Back and Escape with null. True means BACKPORT throughout.
+    /// selected variant id, Back and Escape with null.
     /// </summary>
     internal sealed class MapChoiceWindow : MonoBehaviour
     {
         static MapChoiceWindow _open;
 
-        Action<bool?> _done;
-        bool _backport = true;
-        Tile _left, _right;
+        Action<string> _done;
+        string _selected = MapVariant.Backport;
+        Tile[] _tiles = new Tile[0];
         TMP_FontAsset _font;
 
         TextMeshProUGUI _accept;
@@ -29,9 +29,15 @@ namespace MapVariants.Client
         string[] _warnings = new string[0];
         TextMeshProUGUI _warning;
 
+        internal sealed class Choice
+        {
+            public string Variant, Label, Description;
+            public Sprite Preview;
+        }
+
         sealed class Tile
         {
-            public bool Backport;
+            public string Variant;
             public Image Picture, Tag;
             public RectTransform Root;
             public TextMeshProUGUI Name, Description;
@@ -99,7 +105,7 @@ namespace MapVariants.Client
             return _edgeFade;
         }
 
-        internal static void Show(string title, Sprite originalPreview, string originalLabel, Sprite backportPreview, string backportLabel, string[] backportWarnings, Action<bool?> done)
+        internal static void Show(string title, Choice[] choices, string[] backportWarnings, Action<string> done)
         {
             if (_open != null) { Destroy(_open.gameObject); _open = null; }
             var host = new GameObject("MV_MapChoice", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
@@ -115,10 +121,10 @@ namespace MapVariants.Client
             _open = host.AddComponent<MapChoiceWindow>();
             _open._done = done;
             _open._warnings = WarningPolicy.Normalise(backportWarnings);
-            _open.Build(title, originalPreview, originalLabel, backportPreview, backportLabel);
+            _open.Build(title, choices);
         }
 
-        void Build(string title, Sprite originalPreview, string originalLabel, Sprite backportPreview, string backportLabel)
+        void Build(string title, Choice[] choices)
         {
             _font = GameFont();
 
@@ -126,8 +132,12 @@ namespace MapVariants.Client
             backdrop.gameObject.AddComponent<Image>().color = new Color(BackdropColor.r, BackdropColor.g, BackdropColor.b, 0.94f);
 
             Label("Title", transform, title, 44, Bright, new Vector2(0.5f, 1f), new Vector2(0f, -52f), new Vector2(1400f, 60f), FontStyles.UpperCase);
-            _left = MakeTile(originalPreview, originalLabel.ToUpperInvariant(), "The map SPT ships", new Vector2(-400f, 40f), backport: false);
-            _right = MakeTile(backportPreview, backportLabel.ToUpperInvariant(), "The backported map", new Vector2(400f, 40f), backport: true);
+            _tiles = choices.Select((c, i) =>
+            {
+                var slot = ChoiceLayout.Place(choices.Length, i);
+                return MakeTile(c.Preview, c.Label.ToUpperInvariant(), c.Description, c.Variant,
+                                new Vector2(slot.X, slot.Y), new Vector2(slot.Width, slot.Height));
+            }).ToArray();
 
             // Word wrapping, unlike every other label here, because this one is a sentence rather than
             // a caption and its length depends on what the provider has to say.
@@ -137,15 +147,18 @@ namespace MapVariants.Client
             _warning.characterSpacing = 0f;
 
             TextButton("BACK", new Vector2(-160f, 58f), () => Close(null));
-            _accept = TextButton("NEXT", new Vector2(160f, 58f), () => Close(_backport));
+            _accept = TextButton("NEXT", new Vector2(160f, 58f), () => Close(_selected));
 
-            Select(true);
+            Select(MapVariant.Backport);
         }
 
-        Tile MakeTile(Sprite preview, string name, string description, Vector2 offset, bool backport)
+        Tile MakeTile(Sprite preview, string name, string description, string variant, Vector2 offset, Vector2 size)
         {
-            var tile = new Tile { Backport = backport, Text = name };
-            var root = Rect("Tile_" + name, transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(720f, 620f), offset);
+            var tile = new Tile { Variant = variant, Text = name };
+            var width = size.x;
+            // Text shrinks with a grid tile so a long label still fits; a two-tile window keeps full size.
+            var textScale = Mathf.Min(1f, width / 560f);
+            var root = Rect("Tile_" + name, transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), size, offset);
             tile.Root = root;
 
             var pictureRect = Rect("Picture", root, new Vector2(0f, 0.3f), new Vector2(1f, 1f), Vector2.zero, Vector2.zero);
@@ -166,27 +179,28 @@ namespace MapVariants.Client
             DressAsTape(tile.Tag, 48f);
             tile.Tag.raycastTarget = false;
 
-            tile.Name = Label("Name", root, name, 26, Muted, new Vector2(0.5f, 0.3f), new Vector2(0f, -36f), new Vector2(680f, 48f), FontStyles.UpperCase);
+            tile.Name = Label("Name", root, name, 26 * textScale, Muted, new Vector2(0.5f, 0.3f), new Vector2(0f, -36f), new Vector2(width - 40f, 48f), FontStyles.UpperCase);
             tagRect.sizeDelta = new Vector2(tile.Name.GetPreferredValues(name.ToUpperInvariant()).x + 96f, 48f);
 
-            tile.Description = Label("Description", root, description, 20, Muted, new Vector2(0.5f, 0.3f), new Vector2(0f, -84f), new Vector2(640f, 32f), FontStyles.Normal);
+            tile.Description = Label("Description", root, description, 20 * textScale, Muted, new Vector2(0.5f, 0.3f), new Vector2(0f, -84f), new Vector2(width - 80f, 32f), FontStyles.Normal);
 
             var button = root.gameObject.AddComponent<Button>();
             button.transition = Selectable.Transition.None;
-            button.onClick.AddListener(() => Select(backport));
+            button.onClick.AddListener(() => Select(variant));
             var hover = root.gameObject.AddComponent<HoverRelay>();
-            hover.Enter = () => { if (_backport != backport) tile.Picture.color = Hovered; };
-            hover.Exit = () => { if (_backport != backport) tile.Picture.color = Dimmed; };
+            hover.Enter = () => { if (_selected != variant) tile.Picture.color = Hovered; };
+            hover.Exit = () => { if (_selected != variant) tile.Picture.color = Dimmed; };
             root.gameObject.AddComponent<Image>().color = Color.clear;   // the click target over the whole tile
             return tile;
         }
 
-        void Select(bool backport)
+        void Select(string variant)
         {
-            _backport = backport;
-            foreach (var tile in new[] { _left, _right })
+            _selected = variant;
+            var backport = MapVariant.IsBackport(variant);
+            foreach (var tile in _tiles)
             {
-                var on = tile.Backport == backport;
+                var on = tile.Variant == variant;
                 tile.Picture.color = tile.Picture.sprite == null ? new Color(0.2f, 0.22f, 0.25f, 1f) : (on ? Lit : Dimmed);
                 tile.Root.localScale = Vector3.one * (on ? 1.04f : 0.96f);
                 tile.Tag.enabled = on;
@@ -194,7 +208,7 @@ namespace MapVariants.Client
                 tile.Description.color = on ? Bright : Muted;
             }
 
-            // The warning is about the backported tile only, and the button asks for a deliberate yes
+            // The warning is about the tiles built on the backport only, and the button asks for a deliberate yes
             // while it is showing.
             if (_warning != null) _warning.enabled = WarningPolicy.Shows(backport, _warnings);
             if (_accept != null) _accept.text = WarningPolicy.AcceptCaption(backport, _warnings);
@@ -222,12 +236,20 @@ namespace MapVariants.Client
         void Update()
         {
             if (Input.GetKeyDown(KeyCode.Escape)) Close(null);
-            else if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)) Close(_backport);
-            else if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)) Select(false);
-            else if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) Select(true);
+            else if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)) Close(_selected);
+            else if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)) Step(-1, 0);
+            else if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) Step(1, 0);
+            else if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) Step(0, -1);
+            else if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) Step(0, 1);
         }
 
-        void Close(bool? result)
+        void Step(int dx, int dy)
+        {
+            var at = Array.FindIndex(_tiles, t => t.Variant == _selected);
+            Select(_tiles[ChoiceLayout.Step(_tiles.Length, at, dx, dy)].Variant);
+        }
+
+        void Close(string result)
         {
             var done = _done;
             _done = null;

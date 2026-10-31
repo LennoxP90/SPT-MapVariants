@@ -43,14 +43,21 @@ namespace MapVariants.Client
         // rather than throwing back into a third party's Awake. See docs/DESIGN-NOTES.md.
         internal static bool Register(string[] locationIds, string displayName, string backportName, string originalName,
                                       string backportTile, string originalTile, Action<string> onVariant,
-                                      Func<string[]> backportWarnings)
+                                      Func<string[]> backportWarnings,
+                                      string[] extraIds = null, string[] extraNames = null, string[] extraTiles = null)
         {
             try
             {
                 if (Refused(locationIds, backportName, originalName, onVariant)) return false;
+                if ((extraIds?.Length ?? 0) != (extraNames?.Length ?? 0) || (extraTiles != null && extraTiles.Length != extraIds.Length))
+                {
+                    Plugin.Log.LogError($"[MV] Register refused for '{string.Join(",", locationIds)}': extraIds, extraNames and extraTiles must be the same length");
+                    return false;
+                }
 
+                var extras = (extraIds ?? new string[0]).Select((id, i) => new ExtraVariant(id, extraNames[i], extraTiles?[i])).ToArray();
                 var map = new ManagedMap(locationIds, null, backportName, originalName, backportTile, originalTile,
-                                         displayName: displayName);
+                                         displayName: displayName, extras: extras);
                 var entry = BindDefault(map);
 
                 // One statement group: a throw between them would leave a managed map with a callback
@@ -59,7 +66,7 @@ namespace MapVariants.Client
                 Defaults[map.Key] = entry;
                 Callbacks[map.Key] = onVariant;
                 if (backportWarnings != null) Warnings[map.Key] = backportWarnings;
-                Plugin.Log.LogInfo($"[MV] {map.Key}: registered provider ({string.Join(",", map.LocationIds)})");
+                Plugin.Log.LogInfo($"[MV] {map.Key}: registered provider ({string.Join(",", map.LocationIds)}), variants {string.Join(",", map.Variants)}");
                 return true;
             }
             catch (Exception e)
@@ -106,7 +113,7 @@ namespace MapVariants.Client
             return _config.Bind(section, "DefaultSelection", map.BackportName, new ConfigDescription(
                 $"Which {section} to load when PromptSelection is Off, and what you offer when you are first into a "
                 + "transit heading there.",
-                new AcceptableValueList<string>(map.BackportName, map.OriginalName),
+                new AcceptableValueList<string>(new[] { map.BackportName, map.OriginalName }.Concat(map.Extras.Select(x => x.Name)).Distinct().ToArray()),
                 new ConfigurationManagerAttributes { Order = 50 }));
         }
 

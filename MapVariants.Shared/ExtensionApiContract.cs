@@ -8,6 +8,6 @@ namespace MapVariants.Shared
     /// </summary>
     public static class ExtensionApiContract
     {
-        public const string Version = "3.0";
+        public const string Version = "3.1";
     }
 }

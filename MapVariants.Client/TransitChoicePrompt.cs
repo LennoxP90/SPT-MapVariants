@@ -45,18 +45,12 @@ namespace MapVariants.Client
                         Plugin.Log.LogDebug($"[MV] transit to '{destination}' was claimed by someone else; no prompt");
                         return;
                     }
-                    var preview = MapVariantPrompt.FindPreview(map.Key);
-                    MapChoiceWindow.Show(
-                        "CHOOSE YOUR " + map.DisplayName.ToUpperInvariant(),
-                        MapVariantPrompt.TileImage(map.OriginalTile) ?? preview, VariantDisplay.For(map, MapVariant.Original),
-                        MapVariantPrompt.TileImage(map.BackportTile) ?? preview, VariantDisplay.For(map, MapVariant.Backport),
-                        MapVariantPrompt.Warnings(map),
-                        choice =>
-                        {
-                            // Cancelled: keep what entering the zone already claimed.
-                            if (choice == null) return;
-                            TransitVariantClaim.Choose(destination, choice.Value ? MapVariant.Backport : MapVariant.Original);
-                        });
+                    MapVariantPrompt.ShowChoice(map, choice =>
+                    {
+                        // Cancelled: keep what entering the zone already claimed.
+                        if (choice == null) return;
+                        TransitVariantClaim.Choose(destination, choice);
+                    });
                 }
                 catch (Exception e)
                 {

@@ -19,8 +19,7 @@ namespace MapVariants.Shared
             return map + " - " + variant;
         }
 
-        public static string NameFor(ManagedMap map, string? variant)
-            => MapVariant.IsBackport(variant) ? map.BackportName : map.OriginalName;
+        public static string NameFor(ManagedMap map, string? variant) => map.NameFor(variant);
 
         public static string For(ManagedMap map, string? variant)
             => Compose(map.DisplayName, NameFor(map, variant));

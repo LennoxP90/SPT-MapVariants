@@ -32,6 +32,10 @@ public class VariantRegistry(LocationTable locationTable, ISptLogger<VariantRegi
 
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _installed = new(StringComparer.OrdinalIgnoreCase);
+
+    // Which variant put the backport set on the table: "backport" or a declared one built on it.
+    // The field sets cannot tell them apart, so the id is remembered at install.
+    private readonly Dictionary<string, string> _installedId = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _gate = new();
 
     // Watermark: every location, seven references each. It also forces the LazyLoad accessor's
@@ -183,6 +187,7 @@ public class VariantRegistry(LocationTable locationTable, ISptLogger<VariantRegi
         if (MapVariant.IsBackport(variant))
         {
             entry.Backport.AssignTo(live);
+            _installedId[id] = MapVariant.Normalise(variant);
         }
         else
         {
@@ -265,7 +270,8 @@ public class VariantRegistry(LocationTable locationTable, ISptLogger<VariantRegi
         {
             var live = locationTable.GetLocation(id);
             if (live is null || !_entries.TryGetValue(id, out var e) || e.Backport is null) return MapVariant.Original;
-            return e.Backport.IsLive(live) ? MapVariant.Backport : MapVariant.Original;
+            if (!e.Backport.IsLive(live)) return MapVariant.Original;
+            return _installedId.TryGetValue(id, out var declared) ? declared : MapVariant.Backport;
         }
     }
 
@@ -277,7 +283,7 @@ public class VariantRegistry(LocationTable locationTable, ISptLogger<VariantRegi
             var live = locationTable.GetLocation(id);
             if (live is null) return "no location in the table";
             if (!_entries.TryGetValue(id, out var e) || e.Backport is null) return "not managed";
-            var which = e.Backport.IsLive(live) ? "BACKPORT" : e.Original.IsLive(live) ? "ORIGINAL" : "NEITHER - something else replaced Base";
+            var which = e.Backport.IsLive(live) ? (_installedId.TryGetValue(id, out var v) ? v : MapVariant.Backport).ToUpperInvariant() : e.Original.IsLive(live) ? "ORIGINAL" : "NEITHER - something else replaced Base";
             return $"{which}, {live.Base?.SpawnPointParams?.Count() ?? -1} spawn point(s), {live.Base?.Exits?.Count() ?? -1} exit(s)";
         }
     }

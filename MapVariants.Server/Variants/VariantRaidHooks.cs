@@ -76,7 +76,7 @@ public class VariantRaidHooks(
                 var variant = claimed.Length > 0 ? claimed : VariantResolution.Resolve(ownChoice, latest);
 
                 registry.Install(locationId, variant);
-                logger.Info($"[MV] raid on '{locationId}': {(MapVariant.IsBackport(variant) ? "BACKPORT" : "ORIGINAL")}; the table serves {registry.Installed(locationId)}");
+                logger.Info($"[MV] raid on '{locationId}': {MapVariant.Normalise(variant).ToUpperInvariant()}; the table serves {registry.Installed(locationId)}");
             }
             catch (Exception e)
             {

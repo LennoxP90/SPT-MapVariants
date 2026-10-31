@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Linq;
 
 namespace MapVariants.Shared
 {
@@ -21,8 +22,15 @@ namespace MapVariants.Shared
             return MapVariant.Backport;
         }
 
+        // A declared variant's name is checked after the two, so a name it shares with them loses.
         public static string ToVariant(string? stored, ManagedMap map)
-            => ToVariant(stored, map.BackportName, map.OriginalName);
+        {
+            var value = (stored ?? "").Trim();
+            if (Matches(value, map.BackportName) || Matches(value, map.OriginalName))
+                return ToVariant(stored, map.BackportName, map.OriginalName);
+            var extra = map.Extras.FirstOrDefault(x => Matches(value, x.Name));
+            return extra != null ? extra.Id : ToVariant(stored, map.BackportName, map.OriginalName);
+        }
 
         static bool Matches(string value, string? name)
         {

@@ -22,7 +22,16 @@ namespace MapVariants.Client.Api
 
         public static string CurrentLocationId => BackportSuspend.SessionLocationId;
         public static bool Decided => CurrentVariant != null;
+        // True for every variant except Vanilla: the backport and anything declared on top of it.
+        // Use IsVariant to tell those apart.
         public static bool IsBackport => MapVariant.IsBackport(CurrentVariant);
+
+        // False until decided, and for an id this raid is not, including one nobody declared.
+        public static bool IsVariant(string variant)
+            => string.Equals(CurrentVariant, (variant ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+
+        // Every variant the map offers, original and backport first. Empty for an unmanaged map.
+        public static string[] Variants(string locationId) => ClientMaps.Set.For(locationId)?.Variants ?? new string[0];
 
         public static bool IsManaged(string locationId) => ClientMaps.Set.IsManaged(locationId);
 
@@ -45,6 +54,20 @@ namespace MapVariants.Client.Api
                                     Func<string[]> backportWarnings)
             => ClientMaps.Register(locationIds, displayName, backportName, originalName, backportTile, originalTile,
                                    onVariant, backportWarnings);
+
+        /// <summary>
+        /// Register with further variants beyond the two (API 3.1). Each extra is built on the
+        /// backport: the server serves the backport's data and the backport's client patches stay
+        /// live, and the caller adds its own content on top. Ids are lower-cased and must not be
+        /// "original", "backport" or "unmanaged". A separate name, not a Register overload, so a
+        /// consumer looking Register up by name alone still finds exactly one.
+        /// </summary>
+        /// <param name="extraTiles">May be null; otherwise the same length as extraIds.</param>
+        public static bool RegisterVariants(string[] locationIds, string displayName, string backportName, string originalName,
+                                            string backportTile, string originalTile, string[] extraIds, string[] extraNames,
+                                            string[] extraTiles, Action<string> onVariant, Func<string[]> backportWarnings)
+            => ClientMaps.Register(locationIds, displayName, backportName, originalName, backportTile, originalTile,
+                                   onVariant, backportWarnings, extraIds, extraNames, extraTiles);
 
         public static event Action<string> VariantResolved
         {

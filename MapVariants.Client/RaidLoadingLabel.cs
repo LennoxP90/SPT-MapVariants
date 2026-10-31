@@ -52,11 +52,10 @@ namespace MapVariants.Client
                 // was actually loading.
                 var variant = BackportSuspend.SessionChoice ?? VariantSync.Ask(locationId, out _) ?? MapVariant.Backport;
                 var suffix = Suffix(VariantDisplay.For(map, variant));
-                var other = Suffix(VariantDisplay.For(map, MapVariant.IsBackport(variant) ? MapVariant.Original : MapVariant.Backport));
 
                 var text = label.text ?? "";
-                // Both suffixes are checked, so a second Show cannot stack one on top of the other.
-                if (text.EndsWith(suffix, StringComparison.Ordinal) || text.EndsWith(other, StringComparison.Ordinal)) return;
+                // Every variant's suffix is checked, so a second Show cannot stack one on top of another.
+                if (map.Variants.Any(v => text.EndsWith(Suffix(VariantDisplay.For(map, v)), StringComparison.Ordinal))) return;
 
                 label.text = text + suffix;
                 Plugin.Log.LogDebug($"[MV] loading screen marked '{label.text}'");

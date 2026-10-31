@@ -36,6 +36,38 @@ public class MapVariantTests
         Assert.False(MapVariant.IsBackport(MapVariant.Unmanaged));
     }
 
+    // Ids are process-wide, so each test declares its own to stay independent of the others.
+    [Fact]
+    public void ADeclaredVariantSurvivesNormaliseAndIsNotVanilla()
+    {
+        Assert.True(MapVariant.Declare(" Test-Declared "));
+        Assert.Equal("test-declared", MapVariant.Normalise("TEST-DECLARED"));
+        Assert.True(MapVariant.IsBackport("test-declared"));
+    }
+
+    [Fact]
+    public void AnUndeclaredVariantStillFoldsToOriginal()
+    {
+        Assert.Equal(MapVariant.Original, MapVariant.Normalise("never-declared"));
+        Assert.False(MapVariant.IsBackport("never-declared"));
+    }
+
+    [Theory]
+    [InlineData("original")]
+    [InlineData("BACKPORT")]
+    [InlineData("unmanaged")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void ReservedAndEmptyIdsCannotBeDeclared(string? id)
+        => Assert.False(MapVariant.Declare(id));
+
+    [Fact]
+    public void DeclaringUnmanagedLeavesItFoldingToOriginal()
+    {
+        MapVariant.Declare(MapVariant.Unmanaged);
+        Assert.Equal(MapVariant.Original, MapVariant.Normalise(MapVariant.Unmanaged));
+    }
+
     [Theory]
     [InlineData("unmanaged", true)]
     [InlineData("UNMANAGED", true)]

@@ -241,7 +241,7 @@ namespace MapVariants.Client
 
         static int SuspendedCount(ManagedMap map) => Suspended.TryGetValue(map.Key, out var l) ? l.Count : 0;
 
-        static string Name(string variant) => MapVariant.IsBackport(variant) ? "BACKPORT" : "ORIGINAL";
+        static string Name(string variant) => MapVariant.Normalise(variant).ToUpperInvariant();
 
         static void NotifyProvider(ManagedMap map, Action<string> callback, string variant)
         {

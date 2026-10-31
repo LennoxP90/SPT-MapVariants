@@ -137,17 +137,25 @@ namespace MapVariants.Client
 
         static void Ask(ManagedMap map, string locationId, Action proceed)
         {
+            ShowChoice(map, choice =>
+            {
+                if (choice == null) { Plugin.Log.LogDebug("[MV] cancelled; staying on the map screen"); return; }
+                Choose(choice, locationId, map, proceed, "player");
+            });
+        }
+
+        // One tile per variant, shared by the map screen and the transit prompt.
+        internal static void ShowChoice(ManagedMap map, Action<string> done)
+        {
             var preview = FindPreview(map.Key);
-            MapChoiceWindow.Show(
-                "CHOOSE YOUR " + map.DisplayName.ToUpperInvariant(),
-                TileImage(map.OriginalTile) ?? preview, VariantDisplay.For(map, MapVariant.Original),
-                TileImage(map.BackportTile) ?? preview, VariantDisplay.For(map, MapVariant.Backport),
-                Warnings(map),
-                choice =>
-                {
-                    if (choice == null) { Plugin.Log.LogDebug("[MV] cancelled; staying on the map screen"); return; }
-                    Choose(choice.Value ? MapVariant.Backport : MapVariant.Original, locationId, map, proceed, "player");
-                });
+            var choices = map.Variants.Select(v => new MapChoiceWindow.Choice
+            {
+                Variant = v,
+                Label = VariantDisplay.For(map, v),
+                Description = v == MapVariant.Original ? "The map SPT ships" : v == MapVariant.Backport ? "The backported map" : "Built on " + map.BackportName,
+                Preview = TileImage(map.TileFor(v)) ?? preview,
+            }).ToArray();
+            MapChoiceWindow.Show("CHOOSE YOUR " + map.DisplayName.ToUpperInvariant(), choices, Warnings(map), done);
         }
 
         // Its own try: a throwing supplier costs the warning line, never the player's ability to
