@@ -105,7 +105,7 @@ namespace MapVariants.Client
                 var settings = AccessTools.Field(__instance.GetType(), "RaidSettings")?.GetValue(__instance) as RaidSettings;
                 var locationId = settings?.SelectedLocation?.Id ?? "";
 
-                var map = ClientMaps.Set.For(locationId);
+                var map = ClientMaps.For(locationId);
                 if (map != null || locationId.Length == 0)
                     Plugin.Log.LogDebug($"[MV] {name}: location '{(locationId.Length == 0 ? "none" : locationId)}', managed={map != null}, ask={ClientMaps.Prompt}");
                 if (map == null) return true;
@@ -152,17 +152,28 @@ namespace MapVariants.Client
             {
                 Variant = v,
                 Label = VariantDisplay.For(map, v),
-                Description = v == MapVariant.Original ? "The map SPT ships" : v == MapVariant.Backport ? "The backported map" : "Built on " + map.BackportName,
+                Description = Description(map, v),
                 Preview = TileImage(map.TileFor(v)) ?? preview,
+                Warnings = Warnings(map, v),
             }).ToArray();
-            MapChoiceWindow.Show("CHOOSE YOUR " + map.DisplayName.ToUpperInvariant(), choices, Warnings(map), done);
+            MapChoiceWindow.Show("CHOOSE YOUR " + map.DisplayName.ToUpperInvariant(), choices, done);
         }
 
-        // Its own try: a throwing supplier costs the warning line, never the player's ability to
-        // pick a map.
-        internal static string[] Warnings(ManagedMap map)
+        static string Description(ManagedMap map, string variant)
         {
-            var supplier = ClientMaps.BackportWarnings(map);
+            var owner = map.OwnerOf(variant);
+            if (owner == MapVariant.Original) return "The map SPT ships";
+            if (owner != MapVariant.Backport || variant == MapVariant.Backport) return "The backported map";
+            return "Built on " + map.BackportName;
+        }
+
+        internal static string[] Warnings(ManagedMap map) => Warnings(map, MapVariant.Backport);
+
+        // Its own try: a throwing supplier costs the warning line, never the player's ability to
+        // pick a map. Each tile carries the warnings of whoever owns its variant.
+        internal static string[] Warnings(ManagedMap map, string variant)
+        {
+            var supplier = ClientMaps.WarningsFor(map, variant);
             if (supplier == null) return new string[0];
             try
             {

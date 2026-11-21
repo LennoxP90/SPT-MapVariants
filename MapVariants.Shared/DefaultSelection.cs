@@ -22,14 +22,23 @@ namespace MapVariants.Shared
             return MapVariant.Backport;
         }
 
-        // A declared variant's name is checked after the two, so a name it shares with them loses.
+        // A declared variant's name is checked after the two, and a source's after those, so a name
+        // it shares with them loses. On a map with no backport, anything unrecognised is the resting
+        // source rather than a backport that does not exist.
         public static string ToVariant(string? stored, ManagedMap map)
         {
             var value = (stored ?? "").Trim();
+            if (!map.HasBackport)
+            {
+                if (Matches(value, map.OriginalName)) return MapVariant.Original;
+                return map.Sources.FirstOrDefault(x => Matches(value, x.Name))?.Id ?? map.Resting;
+            }
             if (Matches(value, map.BackportName) || Matches(value, map.OriginalName))
                 return ToVariant(stored, map.BackportName, map.OriginalName);
             var extra = map.Extras.FirstOrDefault(x => Matches(value, x.Name));
-            return extra != null ? extra.Id : ToVariant(stored, map.BackportName, map.OriginalName);
+            if (extra != null) return extra.Id;
+            var source = map.Sources.FirstOrDefault(x => Matches(value, x.Name));
+            return source != null ? source.Id : ToVariant(stored, map.BackportName, map.OriginalName);
         }
 
         static bool Matches(string value, string? name)

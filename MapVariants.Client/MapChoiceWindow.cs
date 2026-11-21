@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using MapVariants.Shared;
 using TMPro;
@@ -24,15 +25,18 @@ namespace MapVariants.Client
 
         TextMeshProUGUI _accept;
 
-        // Things the player should know before choosing the BACKPORT, supplied by a registered
-        // provider. Empty is the normal case, and then nothing about this window changes.
-        string[] _warnings = new string[0];
+        // Things the player should know before choosing a variant, per variant, supplied by whoever
+        // owns it. Empty is the normal case, and then nothing about this window changes.
+        readonly Dictionary<string, string[]> _warnings = new Dictionary<string, string[]>();
         TextMeshProUGUI _warning;
 
         internal sealed class Choice
         {
             public string Variant, Label, Description;
             public Sprite Preview;
+
+            // Shown while this tile is selected. Never shown on the shipped map's tile.
+            public string[] Warnings;
         }
 
         sealed class Tile
@@ -105,7 +109,7 @@ namespace MapVariants.Client
             return _edgeFade;
         }
 
-        internal static void Show(string title, Choice[] choices, string[] backportWarnings, Action<string> done)
+        internal static void Show(string title, Choice[] choices, Action<string> done)
         {
             if (_open != null) { Destroy(_open.gameObject); _open = null; }
             var host = new GameObject("MV_MapChoice", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
@@ -120,7 +124,7 @@ namespace MapVariants.Client
                 host.AddComponent<EventSystem>().gameObject.AddComponent<StandaloneInputModule>();
             _open = host.AddComponent<MapChoiceWindow>();
             _open._done = done;
-            _open._warnings = WarningPolicy.Normalise(backportWarnings);
+            foreach (var choice in choices) _open._warnings[choice.Variant] = WarningPolicy.Normalise(choice.Warnings);
             _open.Build(title, choices);
         }
 
@@ -141,7 +145,7 @@ namespace MapVariants.Client
 
             // Word wrapping, unlike every other label here, because this one is a sentence rather than
             // a caption and its length depends on what the provider has to say.
-            _warning = Label("Warning", transform, WarningPolicy.Text(_warnings), 20, Caution,
+            _warning = Label("Warning", transform, "", 20, Caution,
                              new Vector2(0.5f, 0f), new Vector2(0f, 168f), new Vector2(1240f, 96f), FontStyles.Normal);
             _warning.enableWordWrapping = true;
             _warning.characterSpacing = 0f;
@@ -149,7 +153,8 @@ namespace MapVariants.Client
             TextButton("BACK", new Vector2(-160f, 58f), () => Close(null));
             _accept = TextButton("NEXT", new Vector2(160f, 58f), () => Close(_selected));
 
-            Select(MapVariant.Backport);
+            // The first variant that is not the shipped map, as the backport always was.
+            Select(choices.Select(c => c.Variant).FirstOrDefault(v => v != MapVariant.Original) ?? choices[0].Variant);
         }
 
         Tile MakeTile(Sprite preview, string name, string description, string variant, Vector2 offset, Vector2 size)
@@ -198,6 +203,7 @@ namespace MapVariants.Client
         {
             _selected = variant;
             var backport = MapVariant.IsBackport(variant);
+            var warnings = _warnings.TryGetValue(variant, out var w) ? w : new string[0];
             foreach (var tile in _tiles)
             {
                 var on = tile.Variant == variant;
@@ -210,8 +216,12 @@ namespace MapVariants.Client
 
             // The warning is about the tiles built on the backport only, and the button asks for a deliberate yes
             // while it is showing.
-            if (_warning != null) _warning.enabled = WarningPolicy.Shows(backport, _warnings);
-            if (_accept != null) _accept.text = WarningPolicy.AcceptCaption(backport, _warnings);
+            if (_warning != null)
+            {
+                _warning.text = WarningPolicy.Text(warnings);
+                _warning.enabled = WarningPolicy.Shows(backport, warnings);
+            }
+            if (_accept != null) _accept.text = WarningPolicy.AcceptCaption(backport, warnings);
         }
 
         TextMeshProUGUI TextButton(string caption, Vector2 offset, Action onClick)

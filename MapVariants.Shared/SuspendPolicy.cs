@@ -53,5 +53,19 @@ namespace MapVariants.Shared
         // Asked only from the scene-load path, where the patch set can no longer be changed safely.
         public static bool MustAdoptPatchState(string? sessionChoice, string willLoad)
             => VariantResolution.Resolve(sessionChoice, null) != MapVariant.Normalise(willLoad);
+
+        /// <summary>
+        /// The map-aware form: what the client must adopt because the backport's live patches
+        /// disagree with the choice, or null when they agree. A source's choice agrees with a fully
+        /// suspended backport; any patch still live means the backport loads over it.
+        /// </summary>
+        public static string? AdoptFor(ManagedMap map, string? sessionChoice, int backportPatchesStillLive)
+        {
+            var chosen = VariantResolution.Resolve(sessionChoice, null, map.Resting);
+            var wanted = SourcePolicy.BackportWanted(map, chosen);
+            var loads = backportPatchesStillLive > 0;
+            if (wanted == loads) return null;
+            return loads ? MapVariant.Backport : MapVariant.Original;
+        }
     }
 }

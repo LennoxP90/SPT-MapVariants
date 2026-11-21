@@ -73,7 +73,7 @@ public class VariantRaidHooks(
                 }
 
                 // A Fika headless posts under its OWN session, so it inherits the location's last choice.
-                var variant = claimed.Length > 0 ? claimed : VariantResolution.Resolve(ownChoice, latest);
+                var variant = claimed.Length > 0 ? claimed : VariantResolution.Resolve(ownChoice, latest, registry.Resting(locationId));
 
                 registry.Install(locationId, variant);
                 logger.Info($"[MV] raid on '{locationId}': {MapVariant.Normalise(variant).ToUpperInvariant()}; the table serves {registry.Installed(locationId)}");
@@ -106,8 +106,9 @@ public class VariantRaidHooks(
             // would wipe a claim another map just took on a transit.
             if (registry.HasInstalled(locationId))
             {
-                registry.Install(locationId, MapVariant.Backport);
-                logger.Debug($"[MV] raid over on '{locationId}'; that location's table is back to the backport");
+                var resting = registry.Resting(locationId);
+                registry.Install(locationId, resting);
+                logger.Debug($"[MV] raid over on '{locationId}'; that location's table is back to {resting}");
             }
         }
 

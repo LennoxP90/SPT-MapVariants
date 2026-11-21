@@ -37,7 +37,7 @@ namespace MapVariants.Client
                     // several managed maps, for the wrong one.
                     var destination = point.parameters.location;
 
-                    var map = ClientMaps.Set.For(destination);
+                    var map = ClientMaps.For(destination);
                     if (map == null) return;
                     if (ClientMaps.ReportIfBackportMissing(map)) return;
                     if (!TransitVariantClaim.Owns(destination))

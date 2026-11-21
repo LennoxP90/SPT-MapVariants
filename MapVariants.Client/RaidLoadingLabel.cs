@@ -41,16 +41,16 @@ namespace MapVariants.Client
 
                 var settings = __args.OfType<EFT.RaidSettings>().FirstOrDefault();
                 var locationId = settings?.SelectedLocation?.Id ?? "";
-                var map = ClientMaps.Set.For(locationId);
+                var map = ClientMaps.For(locationId);
                 if (map == null) return;
                 // No backport plugin means no choice was offered; the fallback below would name the backport
                 // over a raid that loads whatever the server serves.
                 if (!ClientMaps.BackportPluginPresent(map)) return;
 
-                // The final fallback is the backport, matching the load path. This client's configured
+                // The final fallback is the resting variant, matching the load path. This client's configured
                 // default labelled every transit with the player's preference rather than with what
                 // was actually loading.
-                var variant = BackportSuspend.SessionChoice ?? VariantSync.Ask(locationId, out _) ?? MapVariant.Backport;
+                var variant = BackportSuspend.SessionChoice ?? VariantSync.Ask(locationId, out _) ?? map.Resting;
                 var suffix = Suffix(VariantDisplay.For(map, variant));
 
                 var text = label.text ?? "";
