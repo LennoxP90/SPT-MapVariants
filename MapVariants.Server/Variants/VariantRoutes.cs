@@ -27,6 +27,10 @@ public sealed class VariantChoiceResponse
 
     // Claimed, Changed or Joined, so the client can say whether the player decided or inherited.
     [JsonPropertyName("outcome")] public string Outcome { get; set; } = "";
+
+    // API 3.3: the client plugin behind the served backport, when its server mod declared one; null
+    // otherwise. An older client ignores it.
+    [JsonPropertyName("plugin")] public string? Plugin { get; set; }
 }
 
 public sealed class ManagedResponse
@@ -81,7 +85,7 @@ public class VariantRoutes(
         // This POST lands while the player is still on the map screen, before the raid is built.
         registry.Install(locationId, variant);
         logger.Info($"[MV] {sessionId} chose '{variant}' for '{locationId}'; the table now serves {registry.Installed(locationId)}");
-        return http.NoBody(new VariantChoiceResponse { Variant = variant });
+        return http.NoBody(new VariantChoiceResponse { Variant = variant, Plugin = registry.ServedPlugin(locationId) });
     }
 
     // Without this each client falls back on its own preference, which on Fika means one player
@@ -106,7 +110,7 @@ public class VariantRoutes(
         {
             logger.Debug($"[MV] {sessionId} joined a transit to '{locationId}' already claimed as '{winner}'");
         }
-        return http.NoBody(new VariantChoiceResponse { Variant = winner, Outcome = outcome.ToString() });
+        return http.NoBody(new VariantChoiceResponse { Variant = winner, Outcome = outcome.ToString(), Plugin = registry.ServedPlugin(locationId) });
     }
 
     // What the table is actually serving, so a Fika joiner and a headless load the scenes that
@@ -114,7 +118,8 @@ public class VariantRoutes(
     private static string Read(HttpRequest? request, VariantRegistry registry, HttpResponseUtil http)
     {
         var locationId = LocationId.Normalise(request?.Query["locationId"].ToString());
-        var variant = registry.IsManaged(locationId) ? registry.InstalledVariant(locationId) : MapVariant.Unmanaged;
-        return http.NoBody(new VariantChoiceResponse { Variant = variant });
+        var managed = registry.IsManaged(locationId);
+        var variant = managed ? registry.InstalledVariant(locationId) : MapVariant.Unmanaged;
+        return http.NoBody(new VariantChoiceResponse { Variant = variant, Plugin = managed ? registry.ServedPlugin(locationId) : null });
     }
 }

@@ -17,6 +17,23 @@ public class Providers(VariantRegistry registry)
     public void Register(string locationId, Location original, Location backport)
         => registry.RegisterProvider(locationId, original, backport);
 
+    // API 3.3: the same, naming the CLIENT plugin (BepInEx GUID) that loads this backport's scenes.
+    public void Register(string locationId, Location original, Location backport, string clientPluginGuid)
+    {
+        registry.RegisterProvider(locationId, original, backport);
+        registry.DeclarePlugin(locationId, clientPluginGuid);
+    }
+
+    /// <summary>
+    /// API 3.3: for a backport's server mod, discovered or registered. Names the CLIENT plugin (its
+    /// BepInEx GUID, as in maps.json pluginGuid) that loads this location's backport scenes. Clients
+    /// compare it with their own backport, and a client whose backport is another mod's falls back to
+    /// the shipped map on both sides instead of loading its scenes over this data. Call any time during
+    /// the load. Undeclared, nothing is compared, as before.
+    /// </summary>
+    public bool DeclarePlugin(string locationId, string clientPluginGuid)
+        => registry.DeclarePlugin(locationId, clientPluginGuid);
+
     // Call before the first raid, once per extra variant built on this backport. False for an empty
     // or reserved id. The variant installs the backport's data; the caller adds its own on top.
     public bool DeclareVariant(string variant) => MapVariant.Declare(variant);

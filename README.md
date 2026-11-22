@@ -34,7 +34,7 @@ in `tiles/<locationId>-original.png` and `tiles/<locationId>-backport.png`.
 
 Everything below is reflection-friendly: consume it after a soft `BepInDependency` on
 `com.lennoxp90.mapvariants`, with no compile-time reference. `ApiVersion` is the contract version,
-currently `3.2`: minor for an addition, major for anything a consumer could break on.
+currently `3.3`: minor for an addition, major for anything a consumer could break on.
 
 **Client, `MapVariants.Client.Api.Maps`:**
 
@@ -62,6 +62,8 @@ currently `3.2`: minor for an addition, major for anything a consumer could brea
 | `DeclareVariant(id)` | Declares a further variant before the first raid (3.1). |
 | `RegisterSource(locationId, variantId, variant)` | Hands over a source's own `Location`, at `PostLoad` (3.2). |
 | `Shipped(locationId)` | The shipped `Location`, as captured before any mod's `Preload`, to build a source from (3.2). |
+| `DeclarePlugin(locationId, clientPluginGuid)` | Names the client plugin (BepInEx GUID, as in `maps.json` `pluginGuid`) that loads this backport's scenes, so clients can tell whose backport the server serves (3.3). See below. |
+| `Register(locationId, original, backport, clientPluginGuid)` | `Register` plus `DeclarePlugin` in one call (3.3). |
 
 A declared variant serves the backport's server data and keeps the backport's client patches; the mod
 that declared it adds its own content on top. FactoryClassic's `halloween2026` is the working example.
@@ -91,10 +93,37 @@ Classic. A source can also stand alone, with no backport on that map.
   suspended and its stand-down runs, exactly as for a Vanilla raid. A backport whose plugin is not
   loaded drops out and the sources stay on offer.
 - **Every client and the headless** need the same sources installed: a variant id a client has never
-  heard of reads as `original` there.
+  heard of reads as `original` there. Since 3.3 the client logs an error naming that variant
+  whenever the server serves one it cannot load.
 
 Load-time configuration replay (an SVM-style mod's values copied onto the shipped map) still runs from
 the backport only; a source serves the values it was built with. Likewise, a mod that edits the live
 location after a source registered (a spawn mod later in `PostLoad`) edits the shipped map or the
 backport, not the source: a source that wants those edits registers late in `PostLoad`, before
 MapVariants' discovery at `PostLoad + 500000`.
+
+### Whose backport the server serves (3.3)
+
+The word `backport` cannot say which mod is behind it. With a mod installed on the server only, the
+server can serve one mod's Customs as `backport` while a client loads another mod's Customs scenes as
+`backport`: both sides agree on the word, and the raid runs one map's scenes over the other's data
+(containers with no loot, exits that do not match), with no error anywhere.
+
+- **Server.** A backport's server mod calls `Providers.DeclarePlugin(locationId, clientPluginGuid)`
+  (or the four-argument `Register`) with the GUID of its own client plugin. Any time during the load
+  works; it survives discovery and re-registration.
+- **Wire.** `/mapvariants/variant`, `/mapvariants/transitclaim` and `/mapvariants/hostvariant` answer
+  with `plugin` beside `variant`: the declared GUID while the backport (or a variant built on it) is
+  served, otherwise null. Older clients ignore it.
+- **Client.** Every answer is checked against this client's map (`ServedCheck`). It is an error when
+  the server serves a variant no plugin here offers, a backport on a map with no backport here, or a
+  backport whose `plugin` differs from this client's `maps.json` `pluginGuid`. On the map screen, the
+  only point where both sides can still move, a choice the server answers with another mod's backport
+  is replaced by the shipped map on both sides. A headless or a joining client cannot change what the
+  server already serves, so it logs the error and loads as before.
+- **Undeclared.** With no `plugin` from the server, or no `pluginGuid` on the client (a `Register`ed
+  provider), nothing is compared, exactly as in 3.2.
+
+Not covered: a map this client does not manage at all (no `maps.json` entry and no source registered)
+is never asked about, so a server-only source on such a map still reads as the shipped map there.
+

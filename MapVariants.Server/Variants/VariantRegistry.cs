@@ -48,6 +48,12 @@ public class VariantRegistry(LocationTable locationTable, ISptLogger<VariantRegi
     private readonly Dictionary<string, string> _installedId = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _gate = new();
 
+    // The client plugin each location's backport belongs to (API 3.3), declared by the backport's own
+    // server mod. Kept apart from the entries, which discovery and RegisterProvider rebuild, so a
+    // declaration made at any point of the load survives them. Absent means undeclared, and the
+    // client then skips its check, exactly as before.
+    private readonly Dictionary<string, string> _backportPlugins = new(StringComparer.OrdinalIgnoreCase);
+
     // Set once discovery has run. A source registered before then is installed by discovery, never
     // at registration, so a backport that builds on the live location later in PostLoad still builds
     // on the shipped data and not on the source's.
@@ -255,6 +261,45 @@ public class VariantRegistry(LocationTable locationTable, ISptLogger<VariantRegi
                 ? $"[MV] {_entries[id].WireId}: registered provider, its backport installed; the table rests on it"
                 : $"[MV] {_entries[id].WireId}: registered provider, but its backport could NOT be installed; "
                   + "the table rests on whatever that mod left there and a raid nobody chose for may be served the wrong data");
+        }
+    }
+
+    /// <summary>
+    /// API 3.3: which CLIENT plugin (its BepInEx GUID) loads this location's backport scenes. The
+    /// variant word alone cannot say which mod is "the backport", so a client whose backport is a
+    /// different mod's would load its scenes over this server's data. Sent on every variant answer;
+    /// the client compares it with its own maps.json pluginGuid. False for an empty GUID.
+    /// </summary>
+    public bool DeclarePlugin(string locationId, string clientPluginGuid)
+    {
+        var guid = (clientPluginGuid ?? "").Trim();
+        if (guid.Length == 0)
+        {
+            logger.Error($"[MV] backport plugin for '{locationId}' refused: the client plugin GUID is empty");
+            return false;
+        }
+        lock (_gate)
+        {
+            var id = Key(locationId);
+            if (_backportPlugins.TryGetValue(id, out var previous) && !string.Equals(previous, guid, StringComparison.OrdinalIgnoreCase))
+                logger.Warning($"[MV] {id}: backport plugin {previous} replaced by {guid}; two mods each declare themselves this map's backport");
+            _backportPlugins[id] = guid;
+            logger.Info($"[MV] {id}: the backport is client plugin {guid}");
+            return true;
+        }
+    }
+
+    // The client plugin behind what the table serves now: the declared one while the backport (or a
+    // variant built on it) is live, else null. A source's id names its own mod; the shipped map has none.
+    public string? ServedPlugin(string locationId)
+    {
+        var id = Key(locationId);
+        // Read first and outside the gate: InstalledVariant takes it itself.
+        var served = InstalledVariant(locationId);
+        lock (_gate)
+        {
+            if (!_backportPlugins.TryGetValue(id, out var guid) || !_entries.TryGetValue(id, out var e)) return null;
+            return e.Sources.ContainsKey(served) || !MapVariant.IsBackport(served) ? null : guid;
         }
     }
 

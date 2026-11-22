@@ -193,6 +193,7 @@ namespace MapVariants.Client
                 // Post first, record second, and record only what came back: a choice the server
                 // never stored has this client loading scenes the host is not serving data for.
                 var recorded = VariantSync.Post(locationId, variant);
+                recorded = FallBackIfServedByAnotherMod(locationId, map, recorded);
                 if (recorded == null)
                 {
                     Plugin.Log.LogError($"[MV] the server did not acknowledge '{variant}' for '{locationId}'; "
@@ -214,6 +215,24 @@ namespace MapVariants.Client
                 Plugin.Log.LogError($"[MV] recording the choice failed, the raid continues on whatever the server serves: {e}");
             }
             proceed();
+        }
+
+        // The server just installed its backport for this choice, and that backport is another mod's
+        // than the one this client loads (ServedCheck). Here, before the raid exists, is the last point
+        // where both sides can still be moved together, so the shipped map is posted instead: Vanilla
+        // on both sides beats one mod's scenes over another mod's data. Returns what to record.
+        static string FallBackIfServedByAnotherMod(string locationId, ManagedMap map, string recorded)
+        {
+            if (recorded == null || map == null || map.OwnerOf(recorded) != MapVariant.Backport) return recorded;
+            var verdict = VariantSync.LastVerdict(locationId);
+            if (verdict != ServedVerdict.BackportOfAnotherMod && verdict != ServedVerdict.NoBackportHere) return recorded;
+
+            var stock = VariantSync.Post(locationId, MapVariant.Original);
+            Plugin.Log.LogError(stock != null
+                ? $"[MV] {map.Key}: the server's backport is not this client's, so this raid loads {VariantDisplay.For(map, MapVariant.Original)} on both sides instead"
+                : $"[MV] {map.Key}: the server's backport is not this client's, and it did not acknowledge the shipped map either; "
+                  + "this raid loads whatever its table serves");
+            return stock;
         }
 
         static object Controller(MatchMakerSelectionLocationScreen screen)

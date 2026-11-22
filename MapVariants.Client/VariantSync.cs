@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using MapVariants.Shared;
 using Newtonsoft.Json.Linq;
 using SPT.Common.Http;
@@ -30,7 +31,8 @@ namespace MapVariants.Client
                 var json = RequestHandler.PostJson(ChoiceRoute, body);
                 if (string.IsNullOrWhiteSpace(json)) return null;
 
-                var recorded = JObject.Parse(json)["variant"]?.ToString();
+                var answer = JObject.Parse(json);
+                var recorded = answer["variant"]?.ToString();
                 if (string.IsNullOrWhiteSpace(recorded)) return null;
 
                 if (MapVariant.IsUnmanaged(recorded))
@@ -38,6 +40,7 @@ namespace MapVariants.Client
                     Plugin.Log.LogError($"[MV] the server does not manage '{locationId}'; it did not record '{variant}'");
                     return null;
                 }
+                Inspect(locationId, answer, "the choice it recorded");
 
                 Plugin.Log.LogDebug($"[MV] told the server '{variant}' for '{locationId}'; it recorded '{recorded}'");
                 return MapVariant.Normalise(recorded);
@@ -72,6 +75,7 @@ namespace MapVariants.Client
                     outcome = MapVariant.Unmanaged;
                     return null;
                 }
+                Inspect(locationId, answer, "the transit claim");
 
                 return MapVariant.Normalise(winner);
             }
@@ -100,7 +104,8 @@ namespace MapVariants.Client
                     var json = RequestHandler.GetJson($"{HostRoute}?locationId={locationId}");
                     if (string.IsNullOrWhiteSpace(json)) continue;
 
-                    var variant = JObject.Parse(json)["variant"]?.ToString();
+                    var answer = JObject.Parse(json);
+                    var variant = answer["variant"]?.ToString();
                     if (string.IsNullOrWhiteSpace(variant)) continue;
 
                     if (MapVariant.IsUnmanaged(variant))
@@ -109,6 +114,7 @@ namespace MapVariants.Client
                         return null;
                     }
 
+                    Inspect(locationId, answer, "what its table serves");
                     Plugin.Log.LogDebug($"[MV] the server says '{variant}' for '{locationId}'");
                     return MapVariant.Normalise(variant);
                 }
@@ -119,6 +125,38 @@ namespace MapVariants.Client
             }
 
             return null;
+        }
+        // The last verdict per location, so a caller that can still correct the raid (the map screen)
+        // reads it right after its own call. Main-thread only, like every caller here.
+        static readonly Dictionary<string, ServedVerdict> Verdicts = new Dictionary<string, ServedVerdict>(StringComparer.OrdinalIgnoreCase);
+        static readonly HashSet<string> Reported = new HashSet<string>();
+
+        internal static ServedVerdict LastVerdict(string locationId)
+            => Verdicts.TryGetValue(ManagedMap.Normalise(locationId), out var v) ? v : ServedVerdict.Unverified;
+
+        // Checks what the server serves against what this client can load. It only reports: what to
+        // do about a mismatch is the caller's, because only the map screen can still change both sides.
+        // Its own try, so a defect here never costs the caller its answer.
+        static void Inspect(string locationId, JObject answer, string what)
+        {
+            try
+            {
+                var id = ManagedMap.Normalise(locationId);
+                var served = answer["variant"]?.ToString();
+                var plugin = answer["plugin"]?.Type == JTokenType.String ? answer["plugin"].ToString() : null;
+                var map = ClientMaps.For(id);
+                var verdict = ServedCheck.Judge(map, served, plugin);
+                Verdicts[id] = verdict;
+                if (!ServedCheck.IsMismatch(verdict)) return;
+
+                // Once per location, variant and plugin: the same answer comes back at every decision point.
+                if (Reported.Add($"{id}|{served}|{plugin}"))
+                    Plugin.Log.LogError($"[MV] {what}: {ServedCheck.Describe(map, id, served, plugin, verdict)}");
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning($"[MV] could not check the server's answer for '{locationId}': {e.GetType().Name}: {e.Message}");
+            }
         }
     }
 }
