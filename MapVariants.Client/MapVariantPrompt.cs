@@ -105,7 +105,7 @@ namespace MapVariants.Client
                 var settings = AccessTools.Field(__instance.GetType(), "RaidSettings")?.GetValue(__instance) as RaidSettings;
                 var locationId = settings?.SelectedLocation?.Id ?? "";
 
-                var map = ClientMaps.Set.For(locationId);
+                var map = ClientMaps.For(locationId);
                 if (map != null || locationId.Length == 0)
                     Plugin.Log.LogDebug($"[MV] {name}: location '{(locationId.Length == 0 ? "none" : locationId)}', managed={map != null}, ask={ClientMaps.Prompt}");
                 if (map == null) return true;
@@ -152,17 +152,19 @@ namespace MapVariants.Client
             {
                 Variant = v,
                 Label = VariantDisplay.For(map, v),
-                Description = v == MapVariant.Original ? "The map SPT ships" : v == MapVariant.Backport ? "The backported map" : "Built on " + map.BackportName,
                 Preview = TileImage(map.TileFor(v)) ?? preview,
+                Warnings = Warnings(map, v),
             }).ToArray();
-            MapChoiceWindow.Show("CHOOSE YOUR " + map.DisplayName.ToUpperInvariant(), choices, Warnings(map), done);
+            MapChoiceWindow.Show(VariantDisplay.ChoiceTitle(map.DisplayName), choices, done);
         }
 
+        internal static string[] Warnings(ManagedMap map) => Warnings(map, MapVariant.Backport);
+
         // Its own try: a throwing supplier costs the warning line, never the player's ability to
-        // pick a map.
-        internal static string[] Warnings(ManagedMap map)
+        // pick a map. Each tile carries the warnings of whoever owns its variant.
+        internal static string[] Warnings(ManagedMap map, string variant)
         {
-            var supplier = ClientMaps.BackportWarnings(map);
+            var supplier = ClientMaps.WarningsFor(map, variant);
             if (supplier == null) return new string[0];
             try
             {
@@ -182,6 +184,7 @@ namespace MapVariants.Client
                 // Post first, record second, and record only what came back: a choice the server
                 // never stored has this client loading scenes the host is not serving data for.
                 var recorded = VariantSync.Post(locationId, variant);
+                recorded = FallBackIfServedByAnotherMod(locationId, map, recorded);
                 if (recorded == null)
                 {
                     Plugin.Log.LogError($"[MV] the server did not acknowledge '{variant}' for '{locationId}'; "
@@ -203,6 +206,24 @@ namespace MapVariants.Client
                 Plugin.Log.LogError($"[MV] recording the choice failed, the raid continues on whatever the server serves: {e}");
             }
             proceed();
+        }
+
+        // The server just answered this choice with something this client cannot load as the server
+        // serves it (ServedCheck): another mod's backport, a backport where this client has none, or a
+        // variant no plugin here offers (a source installed only on the server). Here, before the raid
+        // exists, is the last point where both sides can still be moved together, so the shipped map is
+        // posted instead: Vanilla on both sides beats one mod's scenes over another mod's data.
+        static string FallBackIfServedByAnotherMod(string locationId, ManagedMap map, string recorded)
+        {
+            if (recorded == null || map == null || MapVariant.Normalise(recorded) == MapVariant.Original) return recorded;
+            if (!ServedCheck.IsMismatch(VariantSync.LastVerdict(locationId))) return recorded;
+
+            var stock = VariantSync.Post(locationId, MapVariant.Original);
+            Plugin.Log.LogError(stock != null
+                ? $"[MV] {map.Key}: the server's backport is not this client's, so this raid loads {VariantDisplay.For(map, MapVariant.Original)} on both sides instead"
+                : $"[MV] {map.Key}: the server's backport is not this client's, and it did not acknowledge the shipped map either; "
+                  + "this raid loads whatever its table serves");
+            return stock;
         }
 
         static object Controller(MatchMakerSelectionLocationScreen screen)

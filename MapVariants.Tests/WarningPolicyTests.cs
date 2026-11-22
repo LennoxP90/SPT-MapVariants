@@ -169,22 +169,22 @@ public class DefaultSelectionTests
     public void TheMatchIsTrimmedAndCaseInsensitive(string stored)
         => Assert.Equal(MapVariant.Original, DefaultSelection.ToVariant(stored, "Manimal", "Vanilla"));
 
-    // Anything unrecognised falls back to the backport, this mod's documented default.
+    // Anything unrecognised falls back to the map SPT ships, the same as the default.
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("Retail")]
     [InlineData("whatever the last version wrote")]
-    public void AnUnrecognisedValueFallsBackToTheBackport(string? stored)
-        => Assert.Equal(MapVariant.Backport, DefaultSelection.ToVariant(stored, "Manimal", "Vanilla"));
+    public void AnUnrecognisedValueFallsBackToVanilla(string? stored)
+        => Assert.Equal(MapVariant.Original, DefaultSelection.ToVariant(stored, "Manimal", "Vanilla"));
 
-    // Two blanks must not compare equal, or the map resolves to whichever side was tested first.
+    // Two blanks must not compare equal: a blank backport name never claims a blank value.
     [Fact]
     public void ABlankDeclaredNameMatchesNothing()
     {
-        Assert.Equal(MapVariant.Backport, DefaultSelection.ToVariant("", "", ""));
-        Assert.Equal(MapVariant.Backport, DefaultSelection.ToVariant("Vanilla", "Manimal", ""));
+        Assert.Equal(MapVariant.Original, DefaultSelection.ToVariant("", "", ""));
+        Assert.Equal(MapVariant.Original, DefaultSelection.ToVariant("Vanilla", "Manimal", ""));
     }
 
     [Fact]

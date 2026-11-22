@@ -36,7 +36,7 @@ public class ExtraVariantTests
     [InlineData("halloween 2026", "test-halloween")]
     [InlineData("Classic", "backport")]
     [InlineData("Vanilla", "original")]
-    [InlineData("nonsense", "backport")]
+    [InlineData("nonsense", "original")]
     public void DefaultSelectionReadsEveryVariantName(string stored, string expected)
         => Assert.Equal(expected, DefaultSelection.ToVariant(stored, Factory()));
 

@@ -13,7 +13,9 @@ namespace MapVariants.Client
     /// <summary>
     /// Makes the client match the variant chosen for a raid: a shipped raid
     /// removes the backport's patches on LoadPresetAsync, a backport raid puts
-    /// them back, and a registered provider is told to do its own swap.
+    /// them back, and a registered provider is told to do its own swap. A source's
+    /// raid removes the backport's patches as a shipped raid does, and every source
+    /// is told whether the raid is its own.
     /// </summary>
     // Apply runs from the map screen and from a transit claim, both outside any scene load, so
     // Harmony's rebuild lands on the next LoadPresetAsync. Before only observes. Changing the patch
@@ -249,6 +251,22 @@ namespace MapVariants.Client
             catch (Exception e) { Plugin.Log.LogError($"[MV] {map.Key}: provider callback threw: {e}"); }
         }
 
+        // Every source hears every choice, in its own two words, so the one that loaded last raid
+        // stands down when another variant is picked.
+        static void NotifySources(ManagedMap map, string chosen, string source)
+        {
+            var told = new List<string>();
+            foreach (var pair in ClientMaps.SourceCallbacksFor(map))
+            {
+                var word = SourcePolicy.ForSource(map, pair.Key, chosen);
+                try { pair.Value(word); }
+                catch (Exception e) { Plugin.Log.LogError($"[MV] {map.Key}: source '{pair.Key}' callback threw: {e}"); }
+                told.Add($"{pair.Key}={word}");
+            }
+            if (told.Count > 0)
+                Plugin.Log.LogInfo($"[MV] {map.Key}: {Name(chosen)} from {source}; sources told {string.Join(", ", told)}");
+        }
+
         /// <summary>
         /// Applies the patch state for a variant, from the map screen or a transit
         /// claim, both of which run while nothing is loading. source names the
@@ -259,45 +277,19 @@ namespace MapVariants.Client
             try
             {
                 var id = ManagedMap.Normalise(locationId);
-                var map = ClientMaps.Set.For(id);
+                var map = ClientMaps.For(id);
                 if (map == null) return;
                 if (ClientMaps.ReportIfBackportMissing(map)) return;
 
-                // Reported here, before anything is suspended. From the load path it would report an
-                // already-emptied set and warn that the backport had no patch at all.
-                ReportSuspendSetOnce(map);
-
                 var wanted = MapVariant.Normalise(variant);
-                var wantStock = !MapVariant.IsBackport(wanted);
 
                 // The only way a log shows whether the previous raid's scenes were still loaded.
                 Plugin.Log.LogDebug($"[MV] {map.Key}: {SceneManager.sceneCount} scene(s) loaded before applying {wanted}");
 
-                var callback = ClientMaps.Callback(map);
-                if (callback != null)
-                {
-                    // A provider swaps itself and never has its patches touched, so it gets no
-                    // stand-down either: its own callback tells it both directions.
-                    NotifyProvider(map, callback, wanted);
-                    Plugin.Log.LogInfo($"[MV] {map.Key}: applied {Name(wanted)} from {source}; provider notified");
-                    return;
-                }
-
-                wantStock = StandDownBeforeStock(map, id, wantStock);
-
-                // The RECORD says what moved: a boolean "is this map suspended" cannot see a
-                // partial restore.
-                var recordedBefore = SuspendedCount(map);
-                if (wantStock) Suspend(map); else Restore(map);
-
-                wantStock = WithdrawVetoIfStillLive(map, id, wantStock);
-
-                // On every path that ends on the backport, the two withdrawals included.
-                if (!wantStock) _backportLoadedThisSession.Add(map.Key);
-
-                var changed = SuspendPolicy.PatchSetChanged(recordedBefore, SuspendedCount(map));
-                Plugin.Log.LogInfo($"[MV] {map.Key}: applied {(wantStock ? "ORIGINAL" : "BACKPORT")} from {source}; "
-                                   + $"{(wantStock ? $"suspended {SuspendedCount(map)}" : "restored")}{(changed ? "" : " (unchanged)")}");
+                // The backport first: if it cannot stand down, the raid becomes the backport's and
+                // every source must hear that, not the choice that was refused.
+                if (map.HasBackport) wanted = ApplyBackport(map, id, wanted, source);
+                NotifySources(map, wanted, source);
                 Plugin.Log.LogDebug($"[MV] {map.Key}: {SceneManager.sceneCount} scene(s) loaded after applying");
             }
             catch (Exception e)
@@ -305,6 +297,48 @@ namespace MapVariants.Client
                 Plugin.Log.LogError($"[MV] could not apply '{variant}' for '{locationId}' from {source}; "
                                     + $"the patch state is unchanged and the load path will report what actually runs: {e}");
             }
+        }
+
+        // Returns the variant the raid ends up on: the one wanted, or the backport when it could not
+        // be stood down or suspended.
+        static string ApplyBackport(ManagedMap map, string id, string wanted, string source)
+        {
+            // Reported here, before anything is suspended. From the load path it would report an
+            // already-emptied set and warn that the backport had no patch at all.
+            ReportSuspendSetOnce(map);
+
+            var callback = ClientMaps.Callback(map);
+            if (callback != null)
+            {
+                // A provider swaps itself and never has its patches touched, so it gets no
+                // stand-down either: its own callback tells it both directions.
+                NotifyProvider(map, callback, SourcePolicy.ForBackport(map, wanted));
+                Plugin.Log.LogInfo($"[MV] {map.Key}: applied {Name(wanted)} from {source}; provider notified");
+                return wanted;
+            }
+
+            // The shipped map and every source's variant need the backport's patches off.
+            var wantStock = !SourcePolicy.BackportWanted(map, wanted);
+            var stockAsked = wantStock;
+
+            wantStock = StandDownBeforeStock(map, id, wantStock);
+
+            // The RECORD says what moved: a boolean "is this map suspended" cannot see a
+            // partial restore.
+            var recordedBefore = SuspendedCount(map);
+            if (wantStock) Suspend(map); else Restore(map);
+
+            wantStock = WithdrawVetoIfStillLive(map, id, wantStock);
+
+            // On every path that ends on the backport, the two withdrawals included.
+            if (!wantStock) _backportLoadedThisSession.Add(map.Key);
+
+            var result = stockAsked && !wantStock ? MapVariant.Backport : wanted;
+            var changed = SuspendPolicy.PatchSetChanged(recordedBefore, SuspendedCount(map));
+            var applied = !wantStock ? "BACKPORT" : result == MapVariant.Original ? "ORIGINAL" : $"{Name(result)}, the backport suspended";
+            Plugin.Log.LogInfo($"[MV] {map.Key}: applied {applied} from {source}; "
+                               + $"{(wantStock ? $"suspended {SuspendedCount(map)}" : "restored")}{(changed ? "" : " (unchanged)")}");
+            return result;
         }
 
         // Returns whether the shipped map is still wanted: a backport that cannot be stood down
@@ -421,8 +455,8 @@ namespace MapVariants.Client
                                             + "Nothing is suspended and the raid runs the BACKPORT, untouched.");
                     return;
                 }
-                Plugin.Log.LogError($"[MV] the server did not answer for '{locationId}'; falling back to the BACKPORT, "
-                                    + "which is the resting state of the server's table");
+                Plugin.Log.LogError($"[MV] the server did not answer for '{locationId}'; falling back to the variant "
+                                    + "the server's table rests on");
                 return;
             }
             _asked = true;
@@ -454,10 +488,11 @@ namespace MapVariants.Client
         }
 
         // Once a preset is loading, making the server agree is the only way left to keep its data
-        // and these scenes on the same map.
-        static void AdoptPatchStateIfNeeded(ManagedMap map, string locationId, string willLoad, int live)
+        // and these scenes on the same map. Returns what was adopted, or null when nothing was.
+        static string AdoptPatchStateIfNeeded(ManagedMap map, string locationId, int live)
         {
-            if (!SuspendPolicy.MustAdoptPatchState(SessionChoice, willLoad)) return;
+            var willLoad = SuspendPolicy.AdoptFor(map, SessionChoice, live);
+            if (willLoad == null) return null;
 
             Plugin.Log.LogError($"[MV] {map.Key}: the patch state disagrees with this raid's choice - "
                                 + $"'{SessionChoice ?? "no answer"}' was recorded but {live} of {AssemblyName(map)}'s patch(es) "
@@ -468,6 +503,7 @@ namespace MapVariants.Client
             if (VariantSync.Post(locationId, willLoad) == null)
                 Plugin.Log.LogError($"[MV] {map.Key}: the server did not acknowledge '{willLoad}'; it may be serving the other "
                                     + "variant's data for this raid");
+            return willLoad;
         }
 
         // Observes the load path, it does not decide it: the patch set cannot be changed safely
@@ -486,7 +522,7 @@ namespace MapVariants.Client
                 // point. Do not "fix" this by resolving a location some other way.
                 var locationId = ManagedMap.Normalise(preset.ServerName);
                 if (locationId.Length == 0) return true;
-                var map = ClientMaps.Set.For(locationId);
+                var map = ClientMaps.For(locationId);
                 if (map == null) return true;
                 if (ClientMaps.ReportIfBackportMissing(map)) return true;
 
@@ -499,31 +535,38 @@ namespace MapVariants.Client
 
                 if (SessionChoice == null && !ClientMaps.Prompt) PostConfiguredDefault(map, locationId);
 
-                // No answer means the backport, which is what the server's table rests on, never this
-                // client's configured default.
-                var variant = SessionChoice != null ? MapVariant.Normalise(SessionChoice) : MapVariant.Backport;
+                // No answer means the variant the server's table rests on (the backport, or the first
+                // source on a map with none), never this client's configured default.
+                var variant = SessionChoice != null ? MapVariant.Normalise(SessionChoice) : map.Resting;
                 var callback = ClientMaps.Callback(map);
                 if (callback != null)
                 {
                     // The only notice a session that passed no decision point ever gets. A provider
                     // handed the same answer twice is told nothing new.
-                    NotifyProvider(map, callback, variant);
+                    NotifyProvider(map, callback, SourcePolicy.ForBackport(map, variant));
+                    NotifySources(map, variant, "the load path");
                     Plugin.Log.LogInfo($"[MV] raid on '{locationId}': {Name(variant)}; provider notified");
                     return true;
                 }
 
-                // The patch state is the fact; the recorded choice is only an intention.
-                var live = Selected(map).Count;
-                var willLoad = SuspendPolicy.WillLoad(live);
+                if (map.HasBackport)
+                {
+                    // The patch state is the fact; the recorded choice is only an intention.
+                    var live = Selected(map).Count;
 
-                // The last word on whether the backport actually ran, for a session that reached a
-                // raid without passing a decision point.
-                if (MapVariant.IsBackport(willLoad)) _backportLoadedThisSession.Add(map.Key);
+                    // The last word on whether the backport actually ran, for a session that reached a
+                    // raid without passing a decision point.
+                    if (live > 0) _backportLoadedThisSession.Add(map.Key);
 
-                AdoptPatchStateIfNeeded(map, locationId, willLoad, live);
+                    variant = AdoptPatchStateIfNeeded(map, locationId, live) ?? variant;
 
-                Plugin.Log.LogInfo($"[MV] raid on '{locationId}': {Name(willLoad)}; {live} of {AssemblyName(map)}'s patch(es) live, "
-                                   + $"suspended {SuspendedCount(map)}");
+                    Plugin.Log.LogInfo($"[MV] raid on '{locationId}': {Name(variant)}; {live} of {AssemblyName(map)}'s patch(es) live, "
+                                       + $"suspended {SuspendedCount(map)}");
+                }
+
+                // Before any source's own prefix on this load: this one runs at Priority.First.
+                NotifySources(map, variant, "the load path");
+                if (!map.HasBackport) Plugin.Log.LogInfo($"[MV] raid on '{locationId}': {Name(variant)}; sources notified");
                 return true;
             }
             catch (Exception e)

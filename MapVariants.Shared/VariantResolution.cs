@@ -12,10 +12,15 @@ namespace MapVariants.Shared
         public const string NoAnswer = "";
 
         public static string Resolve(string? ownChoice, string? latestForLocation)
+            => Resolve(ownChoice, latestForLocation, MapVariant.Backport);
+
+        // resting is the variant the table rests on: the backport, or on a map only sources offer,
+        // the source ManagedMap.Resting names.
+        public static string Resolve(string? ownChoice, string? latestForLocation, string resting)
         {
             if (!string.IsNullOrEmpty(ownChoice)) return MapVariant.Normalise(ownChoice);
             if (!string.IsNullOrEmpty(latestForLocation)) return MapVariant.Normalise(latestForLocation);
-            return MapVariant.Backport;
+            return MapVariant.Normalise(resting);
         }
 
         // The raid hook installs only when this is true: the table already rests on the backport,

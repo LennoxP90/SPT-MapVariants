@@ -48,7 +48,7 @@ namespace MapVariants.Client
                 if (locationId.Length == 0) return;
 
                 // Before anything is asked: Ask is a synchronous main-thread request with a retry.
-                var map = ClientMaps.Set.For(locationId);
+                var map = ClientMaps.For(locationId);
                 if (map == null) return;
                 if (ClientMaps.ReportIfBackportMissing(map)) return;
 

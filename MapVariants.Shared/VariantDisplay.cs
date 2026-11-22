@@ -19,6 +19,15 @@ namespace MapVariants.Shared
             return map + " - " + variant;
         }
 
+        // The choice window's heading. "Your" already does the article's job, so a leading "The"
+        // goes: "CHOOSE YOUR LAB", never "CHOOSE YOUR THE LAB".
+        public static string ChoiceTitle(string? displayName)
+        {
+            var name = (displayName ?? "").Trim();
+            if (name.StartsWith("the ", System.StringComparison.OrdinalIgnoreCase)) name = name.Substring(4).TrimStart();
+            return ("Choose your " + name).Trim().ToUpperInvariant();
+        }
+
         public static string NameFor(ManagedMap map, string? variant) => map.NameFor(variant);
 
         public static string For(ManagedMap map, string? variant)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using MapVariants.Shared;
 using TMPro;
@@ -24,15 +25,18 @@ namespace MapVariants.Client
 
         TextMeshProUGUI _accept;
 
-        // Things the player should know before choosing the BACKPORT, supplied by a registered
-        // provider. Empty is the normal case, and then nothing about this window changes.
-        string[] _warnings = new string[0];
+        // Things the player should know before choosing a variant, per variant, supplied by whoever
+        // owns it. Empty is the normal case, and then nothing about this window changes.
+        readonly Dictionary<string, string[]> _warnings = new Dictionary<string, string[]>();
         TextMeshProUGUI _warning;
 
         internal sealed class Choice
         {
-            public string Variant, Label, Description;
+            public string Variant, Label;
             public Sprite Preview;
+
+            // Shown while this tile is selected. Never shown on the shipped map's tile.
+            public string[] Warnings;
         }
 
         sealed class Tile
@@ -40,9 +44,20 @@ namespace MapVariants.Client
             public string Variant;
             public Image Picture, Tag;
             public RectTransform Root;
-            public TextMeshProUGUI Name, Description;
+            public TextMeshProUGUI Name;
             public string Text;
+            public int Page;
         }
+
+        // Only built past four variants (ChoicePaging): chevrons either side of the grid and one dot per
+        // page under it. Drawn, not lettered, so they never read as the game's own BACK and NEXT.
+        RectTransform _previous, _next;
+        Image[] _dots = new Image[0];
+
+        // The page in view. Turning a page moves only this; the selection, its warning and the accept
+        // button stay with whatever was chosen, wherever it is.
+        int _page;
+        static Sprite _dot;
 
         static readonly Color Lit = Color.white;
         static readonly Color Dimmed = new Color(0.26f, 0.28f, 0.30f, 1f);
@@ -105,7 +120,7 @@ namespace MapVariants.Client
             return _edgeFade;
         }
 
-        internal static void Show(string title, Choice[] choices, string[] backportWarnings, Action<string> done)
+        internal static void Show(string title, Choice[] choices, Action<string> done)
         {
             if (_open != null) { Destroy(_open.gameObject); _open = null; }
             var host = new GameObject("MV_MapChoice", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
@@ -120,7 +135,7 @@ namespace MapVariants.Client
                 host.AddComponent<EventSystem>().gameObject.AddComponent<StandaloneInputModule>();
             _open = host.AddComponent<MapChoiceWindow>();
             _open._done = done;
-            _open._warnings = WarningPolicy.Normalise(backportWarnings);
+            foreach (var choice in choices) _open._warnings[choice.Variant] = WarningPolicy.Normalise(choice.Warnings);
             _open.Build(title, choices);
         }
 
@@ -134,14 +149,17 @@ namespace MapVariants.Client
             Label("Title", transform, title, 44, Bright, new Vector2(0.5f, 1f), new Vector2(0f, -52f), new Vector2(1400f, 60f), FontStyles.UpperCase);
             _tiles = choices.Select((c, i) =>
             {
-                var slot = ChoiceLayout.Place(choices.Length, i);
-                return MakeTile(c.Preview, c.Label.ToUpperInvariant(), c.Description, c.Variant,
-                                new Vector2(slot.X, slot.Y), new Vector2(slot.Width, slot.Height));
+                var slot = ChoicePaging.Place(choices.Length, i);
+                var tile = MakeTile(c.Preview, c.Label.ToUpperInvariant(), c.Variant,
+                                    new Vector2(slot.X, slot.Y), new Vector2(slot.Width, slot.Height));
+                tile.Page = ChoicePaging.PageOf(i);
+                return tile;
             }).ToArray();
+            if (ChoicePaging.Paged(choices.Length)) BuildPager(ChoicePaging.Pages(choices.Length));
 
             // Word wrapping, unlike every other label here, because this one is a sentence rather than
             // a caption and its length depends on what the provider has to say.
-            _warning = Label("Warning", transform, WarningPolicy.Text(_warnings), 20, Caution,
+            _warning = Label("Warning", transform, "", 20, Caution,
                              new Vector2(0.5f, 0f), new Vector2(0f, 168f), new Vector2(1240f, 96f), FontStyles.Normal);
             _warning.enableWordWrapping = true;
             _warning.characterSpacing = 0f;
@@ -149,10 +167,11 @@ namespace MapVariants.Client
             TextButton("BACK", new Vector2(-160f, 58f), () => Close(null));
             _accept = TextButton("NEXT", new Vector2(160f, 58f), () => Close(_selected));
 
-            Select(MapVariant.Backport);
+            // The first variant that is not the shipped map, as the backport always was.
+            Select(choices.Select(c => c.Variant).FirstOrDefault(v => v != MapVariant.Original) ?? choices[0].Variant);
         }
 
-        Tile MakeTile(Sprite preview, string name, string description, string variant, Vector2 offset, Vector2 size)
+        Tile MakeTile(Sprite preview, string name, string variant, Vector2 offset, Vector2 size)
         {
             var tile = new Tile { Variant = variant, Text = name };
             var width = size.x;
@@ -182,7 +201,6 @@ namespace MapVariants.Client
             tile.Name = Label("Name", root, name, 26 * textScale, Muted, new Vector2(0.5f, 0.3f), new Vector2(0f, -36f), new Vector2(width - 40f, 48f), FontStyles.UpperCase);
             tagRect.sizeDelta = new Vector2(tile.Name.GetPreferredValues(name.ToUpperInvariant()).x + 96f, 48f);
 
-            tile.Description = Label("Description", root, description, 20 * textScale, Muted, new Vector2(0.5f, 0.3f), new Vector2(0f, -84f), new Vector2(width - 80f, 32f), FontStyles.Normal);
 
             var button = root.gameObject.AddComponent<Button>();
             button.transition = Selectable.Transition.None;
@@ -194,10 +212,105 @@ namespace MapVariants.Client
             return tile;
         }
 
+        const float ChevronX = 600f, ChevronY = 65f, DotY = -286f, DotSpacing = 30f, DotSize = 14f;
+
+        void BuildPager(int pages)
+        {
+            _previous = Chevron("Previous", -1);
+            _next = Chevron("Next", 1);
+            _dots = new Image[pages];
+            for (var page = 0; page < pages; page++)
+            {
+                var rect = Rect("Dot" + page, transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(DotSize, DotSize),
+                                new Vector2((page - (pages - 1) / 2f) * DotSpacing, DotY));
+                _dots[page] = rect.gameObject.AddComponent<Image>();
+                _dots[page].sprite = Dot();
+                var target = page;
+                var button = rect.gameObject.AddComponent<Button>();
+                button.transition = Selectable.Transition.None;
+                button.onClick.AddListener(() => ShowPage(target));
+            }
+        }
+
+        // Two bars meeting at a point, mirrored for the left one.
+        RectTransform Chevron(string name, int direction)
+        {
+            var rect = Rect(name, transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(90f, 160f),
+                            new Vector2(direction * ChevronX, ChevronY));
+            rect.gameObject.AddComponent<Image>().color = Color.clear;   // the click target
+            var bars = new Image[2];
+            for (var i = 0; i < 2; i++)
+            {
+                var up = i == 0 ? 1f : -1f;
+                var bar = Rect("Bar" + i, rect, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(62f, 7f), new Vector2(0f, up * 21f));
+                bar.localEulerAngles = new Vector3(0f, 0f, -up * 45f * direction);
+                bars[i] = bar.gameObject.AddComponent<Image>();
+                bars[i].color = Muted;
+                bars[i].raycastTarget = false;
+            }
+            var button = rect.gameObject.AddComponent<Button>();
+            button.transition = Selectable.Transition.None;
+            button.onClick.AddListener(() => Turn(direction));
+            var hover = rect.gameObject.AddComponent<HoverRelay>();
+            hover.Enter = () => { if (button.interactable) foreach (var b in bars) b.color = Bright; };
+            hover.Exit = () => { foreach (var b in bars) b.color = button.interactable ? Muted : Faint; };
+            return rect;
+        }
+
+        static readonly Color Faint = new Color(0.62f, 0.64f, 0.66f, 0.18f);
+
+        static Sprite Dot()
+        {
+            if (_dot != null) return _dot;
+            const int size = 32;
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear };
+            var pixels = new Color32[size * size];
+            for (var y = 0; y < size; y++)
+                for (var x = 0; x < size; x++)
+                {
+                    var d = Mathf.Sqrt((x - 15.5f) * (x - 15.5f) + (y - 15.5f) * (y - 15.5f));
+                    pixels[y * size + x] = new Color32(255, 255, 255, (byte)Mathf.RoundToInt(Mathf.Clamp01(15.5f - d) * 255f));
+                }
+            texture.SetPixels32(pixels);
+            texture.Apply(false, true);
+            texture.hideFlags = HideFlags.HideAndDontSave | HideFlags.DontUnloadUnusedAsset;
+            _dot = Sprite.Create(texture, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f));
+            _dot.hideFlags = HideFlags.HideAndDontSave | HideFlags.DontUnloadUnusedAsset;
+            return _dot;
+        }
+
+        void Turn(int direction) => ShowPage(_page + Math.Sign(direction));
+
+        // The page in view gets the larger dot; the page holding the selection gets the tape's colour,
+        // so the choice can be found from any page.
+        void ShowPage(int page)
+        {
+            _page = Math.Max(0, Math.Min(page, Math.Max(0, _dots.Length - 1)));
+            foreach (var tile in _tiles) tile.Root.gameObject.SetActive(tile.Page == _page);
+            if (_previous == null) return;
+            SetChevron(_previous, _page > 0);
+            SetChevron(_next, _page < _dots.Length - 1);
+            var chosen = _tiles.FirstOrDefault(t => t.Variant == _selected)?.Page ?? -1;
+            for (var i = 0; i < _dots.Length; i++)
+            {
+                _dots[i].color = i == chosen ? Parchment : i == _page ? Bright : Dimmed;
+                _dots[i].rectTransform.sizeDelta = Vector2.one * (i == _page ? DotSize : DotSize * 0.7f);
+            }
+        }
+
+        static void SetChevron(RectTransform chevron, bool enabled)
+        {
+            chevron.GetComponent<Button>().interactable = enabled;
+            foreach (var bar in chevron.GetComponentsInChildren<Image>().Where(i => i.transform != chevron)) bar.color = enabled ? Muted : Faint;
+        }
+
         void Select(string variant)
         {
             _selected = variant;
+            var selected = _tiles.FirstOrDefault(t => t.Variant == variant);
+            ShowPage(selected?.Page ?? 0);
             var backport = MapVariant.IsBackport(variant);
+            var warnings = _warnings.TryGetValue(variant, out var w) ? w : new string[0];
             foreach (var tile in _tiles)
             {
                 var on = tile.Variant == variant;
@@ -205,13 +318,16 @@ namespace MapVariants.Client
                 tile.Root.localScale = Vector3.one * (on ? 1.04f : 0.96f);
                 tile.Tag.enabled = on;
                 tile.Name.color = on ? Ink : Muted;
-                tile.Description.color = on ? Bright : Muted;
             }
 
             // The warning is about the tiles built on the backport only, and the button asks for a deliberate yes
             // while it is showing.
-            if (_warning != null) _warning.enabled = WarningPolicy.Shows(backport, _warnings);
-            if (_accept != null) _accept.text = WarningPolicy.AcceptCaption(backport, _warnings);
+            if (_warning != null)
+            {
+                _warning.text = WarningPolicy.Text(warnings);
+                _warning.enabled = WarningPolicy.Shows(backport, warnings);
+            }
+            if (_accept != null) _accept.text = WarningPolicy.AcceptCaption(backport, warnings);
         }
 
         TextMeshProUGUI TextButton(string caption, Vector2 offset, Action onClick)
@@ -241,12 +357,14 @@ namespace MapVariants.Client
             else if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) Step(1, 0);
             else if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) Step(0, -1);
             else if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) Step(0, 1);
+            else if (Input.GetKeyDown(KeyCode.Q) || Input.GetKeyDown(KeyCode.PageUp)) Turn(-1);
+            else if (Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.PageDown)) Turn(1);
         }
 
         void Step(int dx, int dy)
         {
             var at = Array.FindIndex(_tiles, t => t.Variant == _selected);
-            Select(_tiles[ChoiceLayout.Step(_tiles.Length, at, dx, dy)].Variant);
+            Select(_tiles[ChoicePaging.Step(_tiles.Length, at, dx, dy)].Variant);
         }
 
         void Close(string result)

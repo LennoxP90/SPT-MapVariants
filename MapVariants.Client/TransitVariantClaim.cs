@@ -57,7 +57,7 @@ namespace MapVariants.Client
         // configured default is their standing preference.
         static string Preference(string destination)
         {
-            var map = ClientMaps.Set.For(destination);
+            var map = ClientMaps.For(destination);
             return map == null ? MapVariant.Original : ClientMaps.DefaultFor(map);
         }
 
@@ -94,7 +94,7 @@ namespace MapVariants.Client
             try { BackportSuspend.Apply(destination, winner, "a transit claim"); }
             catch (Exception e) { Plugin.Log.LogError($"[MV] transit to '{destination}': applying '{winner}' failed: {e}"); }
 
-            var label = VariantDisplay.For(ClientMaps.Set.For(destination), winner);
+            var label = VariantDisplay.For(ClientMaps.For(destination), winner);
 
             // This only reports what the transit is set to; the choice itself is on the transfer
             // screen that holding the interact key opens.
@@ -128,7 +128,7 @@ namespace MapVariants.Client
                 {
                     if (__instance == null) return;
                     var destination = __instance.parameters.location;
-                    var map = ClientMaps.Set.For(destination);
+                    var map = ClientMaps.For(destination);
                     if (map == null) return;
                     if (!IsOurs(col)) return;
                     if (ClientMaps.ReportIfBackportMissing(map)) return;
