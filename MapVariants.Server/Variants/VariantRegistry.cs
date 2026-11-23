@@ -346,6 +346,9 @@ public class VariantRegistry(LocationTable locationTable, ISptLogger<VariantRegi
         }
 
         var wanted = MapVariant.Normalise(variant);
+        // Loading-screen banners are not map data: other mods add theirs to whichever copy is live (ISB Aishi at
+        // PostLoad + 90100), so the list stays with the table and only the map is switched under it.
+        var banners = live.Base?.Banners;
 
         // On a location with no backport, any id that is not a source here means the resting
         // source, exactly as the client's ManagedMap.OwnerOf reads it.
@@ -377,6 +380,7 @@ public class VariantRegistry(LocationTable locationTable, ISptLogger<VariantRegi
             logger.Info($"[MV] {id}: serving the SHIPPED map; its own spawn configuration is in use, not the backport's");
         }
 
+        if (banners is not null && live.Base is not null) live.Base.Banners = banners;
         _installed.Add(id);
     }
 
